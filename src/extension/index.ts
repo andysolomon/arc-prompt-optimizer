@@ -1,28 +1,37 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { PromptOptimizeUnsupportedModeError, promptOptimizeModeSupport } from "./modes.js";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { runPromptOptimizeCommand, type PromptOptimizeCommandContext } from "./command.js";
 
 export { PromptOptimizeUnsupportedModeError, promptOptimizeModeSupport } from "./modes.js";
 export type { ExtensionMode, PromptOptimizeModeSupport } from "./modes.js";
+export { candidateLabel, formatRankingSummary, runPromptOptimizeCommand } from "./command.js";
+export type { PromptOptimizeCommandContext, PromptOptimizeDependencies, PromptOptimizeOutcome } from "./command.js";
+export { listTargetModels, modelReference, resolveTargetModel } from "./models.js";
+export type { ModelLike, TargetModel, TargetModelContext } from "./models.js";
+export { PROGRESS_STATUS_KEY, runWithProgress } from "./progress.js";
+export type { ProgressContext, ProgressLoader, ProgressLoaderFactory, ProgressOptions, ProgressResult } from "./progress.js";
+export {
+  PREVIEW_COMPLETION_COUNT,
+  PREVIEW_COMPLETION_TIMEOUT_MS,
+  PREVIEW_SUITE,
+  baselineCandidate,
+  buildPreviewCandidates,
+  runPreview,
+} from "./run.js";
+export type { PreviewRunOptions, PreviewRunResult } from "./run.js";
+export {
+  MAX_EXTENSION_PROMPT_CHARACTERS,
+  collectPromptSources,
+  latestUserMessageText,
+  promptSizeError,
+  resolvePromptSource,
+} from "./source.js";
+export type { BranchEntryLike, PromptSource, PromptSourceContext } from "./source.js";
 
 export const PROMPT_OPTIMIZE_COMMAND = "prompt-optimize";
 export const PROMPT_OPTIMIZE_DESCRIPTION = "Generate, evaluate, and review prompt candidates without submitting them";
 
-/** Narrow command-context surface the handler reads, so tests need no Pi runtime. */
-export type PromptOptimizeCommandContext = Pick<ExtensionCommandContext, "mode" | "hasUI"> & {
-  readonly ui: Pick<ExtensionCommandContext["ui"], "notify">;
-};
-
-export async function handlePromptOptimize(_args: string, ctx: PromptOptimizeCommandContext): Promise<void> {
-  const support = promptOptimizeModeSupport(ctx.mode);
-  if (!support.supported) {
-    if (ctx.hasUI) {
-      ctx.ui.notify(support.reason, "error");
-      return;
-    }
-    // Print/JSON UI methods are no-ops; throw so the host logs the refusal.
-    throw new PromptOptimizeUnsupportedModeError(ctx.mode, support.reason);
-  }
-  ctx.ui.notify("/prompt-optimize is installed; source selection and candidate review are not available yet.", "warning");
+export async function handlePromptOptimize(args: string, ctx: PromptOptimizeCommandContext): Promise<void> {
+  await runPromptOptimizeCommand(args, ctx);
 }
 
 /** Pi extension entrypoint. Registers an explicit command only: no tools, input hooks, or persistence. */
