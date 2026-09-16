@@ -2,9 +2,29 @@
   "name": "arc-prompt-optimizer",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "main": "./dist/core/index.js",
+  "types": "./dist/core/index.d.ts",
+  "bin": {
+    "arc-prompt": "./bin/arc-prompt"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    }
+  },
   "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepack": "npm run build",
     "release": "semantic-release"
   },
+  "files": [
+    "bin/arc-prompt",
+    "dist/**"
+  ],
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/commit-analyzer": "^13.0.1",
@@ -13,6 +33,11 @@
     "@semantic-release/npm": "^13.1.5",
     "@semantic-release/release-notes-generator": "^14.1.1",
     "conventional-changelog-conventionalcommits": "^10.2.1",
-    "semantic-release": "^25.0.7"
+    "semantic-release": "^25.0.7",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^0.84.4"
   }
 }
