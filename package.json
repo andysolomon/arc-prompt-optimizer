@@ -1,6 +1,6 @@
 {
   "name": "arc-prompt-optimizer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Prompt pattern composition, evaluation, and ranking as a library, the arc-prompt CLI, and a Pi extension.",
   "keywords": [
