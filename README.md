@@ -89,6 +89,17 @@ The exported constants are the source of truth for active limits: `MAX_CRITERION
 
 Judge sections are limited by `MAX_JUDGE_DATA_CHARACTERS = 16,384`, the complete judge prompt by `MAX_JUDGE_PROMPT_CHARACTERS = 48,000`, raw judge output by `MAX_JUDGE_RAW_OUTPUT_CHARACTERS = 8,192`, and rationale by `MAX_JUDGE_RATIONALE_CHARACTERS = 2,000`. Phase 1 template, canonical, criteria-term, and fixture-output bounds remain active as documented above.
 
+## Pi extension
+
+The package is also a [Pi package](https://pi.dev/packages): its `pi.extensions` manifest loads `dist/extension/index.js`, which registers an explicit `/prompt-optimize` command. The extension registers no tools or input hooks, persists nothing, and never submits prompts on your behalf.
+
+```bash
+npm run build
+pi -e /path/to/arc-prompt-optimizer
+```
+
+The command runs only in the interactive TUI. RPC mode reports an error notification, and print/JSON modes fail with a message pointing to the `arc-prompt` CLI. Source selection, candidate review, and editor acceptance are still in progress.
+
 ## Releases
 
 Releases run automatically from `main` with semantic-release. Use Conventional Commits so changes can be versioned correctly:

@@ -2,6 +2,12 @@
   "name": "arc-prompt-optimizer",
   "version": "0.2.0",
   "private": true,
+  "description": "Prompt pattern composition, evaluation, and ranking as a library, the arc-prompt CLI, and a Pi extension.",
+  "keywords": [
+    "pi-package",
+    "prompt-engineering",
+    "prompt-optimization"
+  ],
   "type": "module",
   "main": "./dist/core/index.js",
   "types": "./dist/core/index.d.ts",
@@ -12,6 +18,10 @@
     ".": {
       "types": "./dist/core/index.d.ts",
       "import": "./dist/core/index.js"
+    },
+    "./extension": {
+      "types": "./dist/extension/index.d.ts",
+      "import": "./dist/extension/index.js"
     }
   },
   "scripts": {
@@ -25,6 +35,11 @@
     "bin/arc-prompt",
     "dist/**"
   ],
+  "pi": {
+    "extensions": [
+      "./dist/extension/index.js"
+    ]
+  },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/commit-analyzer": "^13.0.1",
