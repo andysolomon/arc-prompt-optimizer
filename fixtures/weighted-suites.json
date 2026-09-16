@@ -1,0 +1,58 @@
+[
+  {
+    "id": "weighted-engine",
+    "cases": [
+      {
+        "id": "profile-shape",
+        "name": "Profile object shape",
+        "completionFixtureId": "profile-json",
+        "input": "Ada, engineer, active",
+        "expectedOutput": "{\"name\":\"Ada\",\"role\":\"engineer\",\"active\":true}",
+        "judgeRubric": "Score 1 when the profile fields are complete and accurate.",
+        "criteria": {
+          "jsonShape": {
+            "rootType": "object",
+            "requiredKeys": [
+              "name",
+              "role",
+              "active"
+            ]
+          },
+          "maxCharacters": 120,
+          "weights": {
+            "json_shape": 3
+          },
+          "custom": [
+            {
+              "id": "mentions-ada",
+              "weight": 2,
+              "kind": "includes",
+              "value": "Ada",
+              "caseSensitive": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "release-list",
+        "name": "Release list shape",
+        "completionFixtureId": "release-bullets",
+        "criteria": {
+          "expectedFormat": "bullet_list",
+          "listShape": {
+            "minItems": 2,
+            "maxItems": 5
+          },
+          "custom": [
+            {
+              "id": "no-apology",
+              "weight": 1,
+              "kind": "excludes",
+              "value": "sorry"
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

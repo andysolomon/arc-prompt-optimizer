@@ -1,0 +1,58 @@
+[
+  {
+    "id": "structured-output",
+    "cases": [
+      {
+        "id": "json-profile",
+        "name": "Valid profile object",
+        "completionFixtureId": "profile-json",
+        "criteria": {
+          "expectedFormat": "json",
+          "requiredKeywords": [
+            "engineer"
+          ]
+        }
+      },
+      {
+        "id": "bullet-release",
+        "name": "Release summary bullets",
+        "completionFixtureId": "release-bullets",
+        "criteria": {
+          "expectedFormat": "bullet_list",
+          "maxWords": 15
+        }
+      },
+      {
+        "id": "ordered-workflow",
+        "name": "Ordered workflow",
+        "completionFixtureId": "ordered-steps",
+        "criteria": {
+          "expectedFormat": "numbered_list",
+          "minWords": 9
+        }
+      }
+    ]
+  },
+  {
+    "id": "content-constraints",
+    "cases": [
+      {
+        "id": "bounded-api-explanation",
+        "name": "Bounded API explanation",
+        "completionFixtureId": "bounded-keywords",
+        "criteria": {
+          "maxWords": 12,
+          "requiredKeywords": [
+            "API",
+            "rate limit",
+            "requests"
+          ],
+          "forbiddenPhrases": [
+            "in conclusion",
+            "it is important to note"
+          ]
+        }
+      }
+    ]
+  }
+]
