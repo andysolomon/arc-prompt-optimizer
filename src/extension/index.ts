@@ -5,6 +5,14 @@ export { PromptOptimizeUnsupportedModeError, promptOptimizeModeSupport } from ".
 export type { ExtensionMode, PromptOptimizeModeSupport } from "./modes.js";
 export { candidateLabel, formatRankingSummary, runPromptOptimizeCommand } from "./command.js";
 export type { PromptOptimizeCommandContext, PromptOptimizeDependencies, PromptOptimizeOutcome } from "./command.js";
+export {
+  REVIEW_KEEP_OPTION,
+  REVIEW_SELECT_TITLE,
+  candidateSummaryLine,
+  lineDiffSummary,
+  reviewCandidates,
+} from "./review.js";
+export type { LineDiffSummary, ReviewContext, ReviewOutcome } from "./review.js";
 export { listTargetModels, modelReference, resolveTargetModel } from "./models.js";
 export type { ModelLike, TargetModel, TargetModelContext } from "./models.js";
 export { PROGRESS_STATUS_KEY, runWithProgress } from "./progress.js";

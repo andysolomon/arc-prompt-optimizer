@@ -9,13 +9,18 @@ import arcPromptOptimizerExtension, {
   PREVIEW_COMPLETION_COUNT,
   PROMPT_OPTIMIZE_COMMAND,
   PromptOptimizeUnsupportedModeError,
+  REVIEW_KEEP_OPTION,
+  REVIEW_SELECT_TITLE,
   buildPreviewCandidates,
+  candidateSummaryLine,
   collectPromptSources,
   handlePromptOptimize,
+  lineDiffSummary,
   listTargetModels,
   promptOptimizeModeSupport,
   resolvePromptSource,
   resolveTargetModel,
+  reviewCandidates,
   runPreview,
   runPromptOptimizeCommand,
   runWithProgress,
@@ -66,21 +71,14 @@ test("the factory registers an explicit command with a description", () => {
   assert.equal(typeof registered[0].options.handler, "function");
 });
 
-test("mode support allows only the interactive TUI", () => {
+test("mode support allows TUI and RPC and refuses print/JSON", () => {
   assert.deepEqual(promptOptimizeModeSupport("tui"), { supported: true });
-  for (const mode of ["rpc", "json", "print"]) {
+  assert.deepEqual(promptOptimizeModeSupport("rpc"), { supported: true });
+  for (const mode of ["json", "print"]) {
     const support = promptOptimizeModeSupport(mode);
     assert.equal(support.supported, false);
-    assert.match(support.reason, /requires the interactive TUI/u);
+    assert.match(support.reason, /arc-prompt CLI/u);
   }
-});
-
-test("RPC mode reports the unsupported mode through the host UI", async () => {
-  const { ctx, notifications } = fakeContext("rpc", true);
-  await handlePromptOptimize("", ctx);
-  assert.equal(notifications.length, 1);
-  assert.equal(notifications[0].level, "error");
-  assert.match(notifications[0].message, /RPC mode/u);
 });
 
 test("print and JSON modes throw instead of prompting invisibly", async () => {
@@ -172,6 +170,8 @@ function commandContext({
   branch = [],
   selections = [],
   confirm = true,
+  confirms = undefined,
+  editorResults = [],
   registry = fakeRegistry(),
   model = undefined,
   scopedModels = [],
@@ -179,6 +179,8 @@ function commandContext({
   const events = [];
   const record = (name) => (...args) => events.push({ name, args });
   const selectQueue = [...selections];
+  const confirmQueue = confirms === undefined ? undefined : [...confirms];
+  const editorQueue = [...editorResults];
   const ctx = {
     mode,
     hasUI: true,
@@ -198,7 +200,12 @@ function commandContext({
       },
       confirm: async (title, message) => {
         events.push({ name: "confirm", args: [title, message] });
-        return confirm;
+        return confirmQueue === undefined ? confirm : confirmQueue.shift();
+      },
+      editor: async (title, prefill) => {
+        events.push({ name: "editor", args: [title, prefill] });
+        const next = editorQueue.shift();
+        return typeof next === "function" ? next(prefill) : next;
       },
       getEditorText: () => editorText,
       setEditorText: record("setEditorText"),
@@ -383,14 +390,15 @@ test("the command confirms cost before calling a model and declining makes no co
   assertNoForbiddenCalls(events);
 });
 
-test("the command runs the preview and notifies a ranked summary without touching the editor", async () => {
+test("the command runs the preview, notifies a ranked summary, and keeps the editor when review is dismissed", async () => {
   const { ctx, events, registry } = commandContext({
     model: MODEL_B,
     editorText: "Explain closures.",
     selections: [(options) => options[0]],
   });
   const outcome = await runPromptOptimizeCommand("", ctx, { createLoader: fakeLoaderFactory([]) });
-  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.status, "kept");
+  assert.equal(outcome.result.ranking.length, 4);
   assert.equal(outcome.source.label, "editor draft");
   assert.equal(outcome.model.reference, "fake/model-b");
   assert.equal(registry.calls.length, 4);
@@ -408,6 +416,7 @@ test("cancelling the TUI loader stops completions and leaves the editor unchange
   const { ctx, events } = commandContext({ registry });
   const outcome = await runPromptOptimizeCommand("Explain closures.", ctx, { createLoader: fakeLoaderFactory(loaders) });
   assert.equal(outcome.status, "cancelled");
+  assert.equal(events.some((event) => event.name === "select" && event.args[0] === REVIEW_SELECT_TITLE), false);
   // Let the aborted completion settle before counting calls.
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(registry.calls.length, 1);
@@ -426,6 +435,7 @@ test("a failed preview run is reported as an error", async () => {
     },
   });
   assert.equal(outcome.status, "failed");
+  assert.equal(events.some((event) => event.name === "select" && event.args[0] === REVIEW_SELECT_TITLE), false);
   const notice = events.filter((event) => event.name === "notify").at(-1);
   assert.equal(notice.args[1], "error");
   assert.match(notice.args[0], /provider unavailable/u);
@@ -437,4 +447,134 @@ test("the TUI command handler reports a missing prompt instead of running", asyn
   await handlePromptOptimize("", ctx);
   assert.equal(registry.calls.length, 0);
   assert.equal(events.filter((event) => event.name === "notify").at(-1).args[1], "error");
+});
+
+// ---------------------------------------------------------------------------
+// Step B: review, acceptance, modes
+// ---------------------------------------------------------------------------
+
+const unknown = Object.freeze({ status: "unknown", reason: "not reported" });
+
+function syntheticResult() {
+  const candidates = [
+    { id: "base", prompt: { pattern: "baseline", text: "line one\nline two", variablesUsed: [] }, origin: "fixture", metadata: { label: "baseline" } },
+    { id: "crit", prompt: { pattern: "critique", text: "line one\nline two\nline three", variablesUsed: [] }, origin: "rendered", metadata: { label: "critique" } },
+  ];
+  const aggregate = (passed) => ({ caseCount: 1, passedCaseCount: passed ? 1 : 0 });
+  return {
+    baselineCandidateId: "base",
+    candidates,
+    evaluations: [
+      { candidateId: "base", cases: [], aggregate: aggregate(false) },
+      { candidateId: "crit", cases: [], aggregate: aggregate(true) },
+    ],
+    ranking: [
+      {
+        rank: 1,
+        candidateId: "crit",
+        quality: { combined: { status: "measured", value: 0.9 }, deterministic: unknown, judge: unknown },
+        operational: { latencyMs: { status: "measured", value: 120.4 }, totalTokens: unknown, costUsd: unknown },
+        tiedWith: [],
+        tieBrokenBy: null,
+      },
+      {
+        rank: 2,
+        candidateId: "base",
+        quality: { combined: unknown, deterministic: unknown, judge: unknown },
+        operational: { latencyMs: unknown, totalTokens: { status: "measured", value: 15 }, costUsd: { status: "measured", value: 0.001 } },
+        tiedWith: [],
+        tieBrokenBy: null,
+      },
+    ],
+    completionsUsed: 2,
+  };
+}
+
+const SOURCE = Object.freeze({ label: "editor draft", text: "line one\nline two" });
+
+test("line diff summary counts added, removed, and unchanged lines", () => {
+  assert.deepEqual(lineDiffSummary("a\nb\nc", "a\nx\nc\nd"), { added: 2, removed: 1, unchanged: 2, summary: "+2 -1 lines" });
+  assert.deepEqual(lineDiffSummary("same", "same"), { added: 0, removed: 0, unchanged: 1, summary: "+0 -0 lines" });
+  assert.deepEqual(lineDiffSummary("", "a\nb"), { added: 2, removed: 0, unchanged: 0, summary: "+2 -0 lines" });
+  const big = Array.from({ length: 8000 }, (_, index) => `l${index}`).join("\n");
+  const bigDiff = lineDiffSummary(big, `x\n${big.split("\n").reverse().join("\n")}`);
+  assert.equal(bigDiff.added - bigDiff.removed, 1);
+});
+
+test("candidate summary lines show rank, label, measurements or n/a, and the diff", () => {
+  const result = syntheticResult();
+  const top = candidateSummaryLine(result, result.ranking[0]);
+  assert.match(top, /^1\. critique \| score 0\.90 \| passed \| latency 120ms \| tokens n\/a \| cost n\/a \| diff \+1 -0 lines$/u);
+  const base = candidateSummaryLine(result, result.ranking[1]);
+  assert.match(base, /^2\. baseline \(source\) \| score n\/a \| failed \| latency n\/a \| tokens 15 \| cost \$0\.0010 \| diff \+0 -0 lines$/u);
+});
+
+test("accepting a candidate replaces the editor text exactly once with the edited text", async () => {
+  const { ctx, events } = commandContext({
+    editorText: "line one\nline two",
+    selections: [(options) => options[0]],
+    editorResults: [(prefill) => `${prefill}\nedited`],
+  });
+  const outcome = await reviewCandidates(ctx, syntheticResult(), SOURCE);
+  assert.deepEqual(outcome, { status: "accepted", candidateId: "crit", text: "line one\nline two\nline three\nedited" });
+  const select = events.find((event) => event.name === "select");
+  assert.equal(select.args[0], REVIEW_SELECT_TITLE);
+  assert.equal(select.args[1].at(-1), REVIEW_KEEP_OPTION);
+  assert.equal(events.find((event) => event.name === "editor").args[0], "Edit candidate: critique");
+  const confirm = events.find((event) => event.name === "confirm");
+  assert.match(confirm.args[1], /17 characters/u);
+  assert.match(confirm.args[1], /35 characters/u);
+  assert.match(confirm.args[1], /Nothing will be submitted/u);
+  const writes = events.filter((event) => event.name === "setEditorText");
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].args, [outcome.text]);
+  for (const name of ["sendUserMessage", "appendEntry", "setModel"]) {
+    assert.equal(events.some((event) => event.name === name), false);
+  }
+});
+
+test("every review cancel point keeps the editor unchanged", async () => {
+  const cases = [
+    { selections: [undefined] },
+    { selections: [(options) => options.at(-1)] },
+    { selections: [(options) => options[0]], editorResults: [undefined] },
+    { selections: [(options) => options[1]], editorResults: [(prefill) => prefill], confirm: false },
+  ];
+  for (const options of cases) {
+    const { ctx, events } = commandContext(options);
+    assert.deepEqual(await reviewCandidates(ctx, syntheticResult(), SOURCE), { status: "kept" });
+    assertNoForbiddenCalls(events);
+  }
+});
+
+test("RPC mode runs the full dialog flow without custom UI and accepts a reviewed candidate", async () => {
+  const registry = fakeRegistry([MODEL_A]);
+  const previews = [];
+  const { ctx, events } = commandContext({
+    mode: "rpc",
+    registry,
+    editorText: "Explain closures.",
+    confirms: [true, true],
+    selections: [(options) => options[0]],
+    editorResults: [(prefill) => `${prefill} (edited)`],
+  });
+  delete ctx.ui.custom;
+  const outcome = await runPromptOptimizeCommand("", ctx, {
+    runPreview: async (options) => {
+      previews.push(options);
+      return await runPreview({ ...options, modelRegistry: registry });
+    },
+  });
+  assert.equal(outcome.status, "accepted");
+  assert.equal(previews.length, 1);
+  assert.equal(registry.calls.length, 4);
+  assert.equal(events.some((event) => event.name === "custom"), false);
+  const writes = events.filter((event) => event.name === "setEditorText");
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].args, [outcome.text]);
+  assert.match(outcome.text, / \(edited\)$/u);
+  assert.equal(events.filter((event) => event.name === "notify").at(-1).args[0], "Editor text replaced; review and submit it yourself.");
+  for (const name of ["sendUserMessage", "appendEntry", "setModel"]) {
+    assert.equal(events.some((event) => event.name === name), false);
+  }
 });

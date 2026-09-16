@@ -7,24 +7,19 @@ export type PromptOptimizeModeSupport =
   | { readonly supported: false; readonly reason: string };
 
 /**
- * `/prompt-optimize` needs custom TUI components for progress, cancellation, and
- * review. RPC hosts return `undefined` from `ctx.ui.custom()`, and print/JSON hosts
- * cannot prompt at all, so every non-TUI mode is reported instead of run invisibly.
+ * TUI runs with a cancellable loader; RPC uses the dialog-based path (status/notify progress,
+ * no interactive cancel). Print/JSON hosts cannot prompt at all, so they are refused.
  */
 export function promptOptimizeModeSupport(mode: ExtensionMode): PromptOptimizeModeSupport {
   switch (mode) {
     case "tui":
-      return Object.freeze({ supported: true });
     case "rpc":
-      return Object.freeze({
-        supported: false,
-        reason: "/prompt-optimize requires the interactive TUI; RPC mode cannot show its review UI.",
-      });
+      return Object.freeze({ supported: true });
     case "json":
     case "print":
       return Object.freeze({
         supported: false,
-        reason: `/prompt-optimize requires the interactive TUI; ${mode} mode cannot prompt for review. Use the arc-prompt CLI for scripted optimization.`,
+        reason: `/prompt-optimize requires an interactive TUI or RPC host; ${mode} mode cannot prompt for review. Use the arc-prompt CLI for scripted optimization.`,
       });
   }
 }

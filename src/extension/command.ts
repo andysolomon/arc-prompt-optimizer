@@ -4,6 +4,7 @@ import { PromptOptimizeUnsupportedModeError, promptOptimizeModeSupport } from ".
 import { resolveTargetModel, type TargetModel, type TargetModelContext } from "./models.js";
 import { runWithProgress, type ProgressContext, type ProgressOptions } from "./progress.js";
 import { PREVIEW_COMPLETION_COUNT, runPreview, type PreviewRunOptions, type PreviewRunResult } from "./run.js";
+import { reviewCandidates, type ReviewContext } from "./review.js";
 import { resolvePromptSource, type PromptSource, type PromptSourceContext } from "./source.js";
 
 /** Narrow command-context surface the handler reads, so tests need no Pi runtime. */
@@ -12,7 +13,7 @@ export type PromptOptimizeCommandContext = Pick<ExtensionCommandContext, "mode" 
   Omit<TargetModelContext, "ui"> &
   ProgressContext & {
     readonly modelRegistry: TargetModelContext["modelRegistry"] & Partial<Pick<ModelRegistry, "complete" | "getAll">>;
-    readonly ui: PromptSourceContext["ui"] & TargetModelContext["ui"] & ProgressContext["ui"] & Pick<ExtensionCommandContext["ui"], "confirm">;
+    readonly ui: PromptSourceContext["ui"] & TargetModelContext["ui"] & ProgressContext["ui"] & ReviewContext["ui"];
   };
 
 export interface PromptOptimizeDependencies extends ProgressOptions {
@@ -26,7 +27,20 @@ export type PromptOptimizeOutcome =
   | { readonly status: "declined"; readonly source: PromptSource; readonly model: TargetModel }
   | { readonly status: "cancelled"; readonly source: PromptSource; readonly model: TargetModel }
   | { readonly status: "failed"; readonly source: PromptSource; readonly model: TargetModel; readonly error: unknown }
-  | { readonly status: "completed"; readonly source: PromptSource; readonly model: TargetModel; readonly result: PreviewRunResult };
+  | {
+      readonly status: "kept";
+      readonly source: PromptSource;
+      readonly model: TargetModel;
+      readonly result: PreviewRunResult;
+    }
+  | {
+      readonly status: "accepted";
+      readonly source: PromptSource;
+      readonly model: TargetModel;
+      readonly result: PreviewRunResult;
+      readonly candidateId: string;
+      readonly text: string;
+    };
 
 function formatMeasurement(measurement: Measurement, format: (value: number) => string): string {
   return measurement.status === "measured" ? format(measurement.value) : "n/a";
@@ -52,8 +66,8 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Mode guard → source → model → cost confirmation → preview run with progress.
- * Never submits, persists, or edits the draft; the result is returned for review.
+ * Mode guard → source → model → cost confirmation → preview run with progress → review.
+ * Never submits or persists anything; the editor changes only after an explicit confirmed replace.
  */
 export async function runPromptOptimizeCommand(
   args: string,
@@ -99,9 +113,14 @@ export async function runPromptOptimizeCommand(
   );
 
   switch (progress.status) {
-    case "completed":
-      ctx.ui.notify(formatRankingSummary(progress.value, model), "info");
-      return Object.freeze({ status: "completed", source, model, result: progress.value });
+    case "completed": {
+      const result = progress.value;
+      ctx.ui.notify(formatRankingSummary(result, model), "info");
+      const review = await reviewCandidates(ctx, result, source);
+      if (review.status === "kept") return Object.freeze({ status: "kept", source, model, result });
+      ctx.ui.notify("Editor text replaced; review and submit it yourself.", "info");
+      return Object.freeze({ status: "accepted", source, model, result, candidateId: review.candidateId, text: review.text });
+    }
     case "cancelled":
       ctx.ui.notify("/prompt-optimize cancelled; the editor was not changed.", "info");
       return Object.freeze({ status: "cancelled", source, model });

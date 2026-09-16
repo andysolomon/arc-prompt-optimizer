@@ -98,7 +98,15 @@ npm run build
 pi -e /path/to/arc-prompt-optimizer
 ```
 
-The command runs only in the interactive TUI. RPC mode reports an error notification, and print/JSON modes fail with a message pointing to the `arc-prompt` CLI. Source selection, candidate review, and editor acceptance are still in progress.
+Running `/prompt-optimize [prompt]`:
+
+1. **Source.** Text after the command is used directly. Otherwise, you pick between the editor draft and the latest user message; if only one exists, it is used. Prompts are limited to 16,384 characters.
+2. **Model.** Pick the target model from your scoped models, or from the available models if none are scoped. The active model is listed first. The session model is never changed.
+3. **Cost confirmation.** Nothing calls a model until you confirm the run: 4 completions, for the source baseline plus three pattern variants.
+4. **Progress.** In the TUI, a bordered loader shows progress and Escape cancels the run. Cancelled or failed runs leave the editor untouched.
+5. **Review.** A ranked summary lists each candidate's score, pass/fail, latency, tokens, cost (`n/a` when unknown), and a line diff against the source. Pick a candidate, edit it, then confirm to replace the editor text. You can instead keep the current text, or cancel at any step, and nothing changes.
+
+The command never auto-submits. After a replacement, you review and submit the editor text yourself. RPC mode is supported through dialogs, with progress reported through status and notifications and no interactive cancel. Print and JSON modes are unsupported and fail with a message pointing to the `arc-prompt` CLI.
 
 ## Releases
 
