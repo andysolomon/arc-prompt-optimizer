@@ -30,6 +30,6 @@ test("fixture labels are not used as a raw quality oracle", async () => {
 test("package identity, version, and semantic-release script remain preserved", async () => {
   const packageJson = JSON.parse(await readFile(new URL("package.json", rootUrl), "utf8"));
   assert.equal(packageJson.name, "arc-prompt-optimizer");
-  assert.equal(packageJson.version, "0.1.0");
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/u, "semantic-release owns the version number");
   assert.equal(packageJson.scripts.release, "semantic-release");
 });

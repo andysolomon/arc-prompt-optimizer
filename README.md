@@ -89,6 +89,25 @@ The exported constants are the source of truth for active limits: `MAX_CRITERION
 
 Judge sections are limited by `MAX_JUDGE_DATA_CHARACTERS = 16,384`, the complete judge prompt by `MAX_JUDGE_PROMPT_CHARACTERS = 48,000`, raw judge output by `MAX_JUDGE_RAW_OUTPUT_CHARACTERS = 8,192`, and rationale by `MAX_JUDGE_RATIONALE_CHARACTERS = 2,000`. Phase 1 template, canonical, criteria-term, and fixture-output bounds remain active as documented above.
 
+## Pi extension
+
+The package is also a [Pi package](https://pi.dev/packages): its `pi.extensions` manifest loads `dist/extension/index.js`, which registers an explicit `/prompt-optimize` command. The extension registers no tools or input hooks, persists nothing, and never submits prompts on your behalf.
+
+```bash
+npm run build
+pi -e /path/to/arc-prompt-optimizer
+```
+
+Running `/prompt-optimize [prompt]`:
+
+1. **Source.** Text after the command is used directly. Otherwise, you pick between the editor draft and the latest user message; if only one exists, it is used. Prompts are limited to 16,384 characters.
+2. **Model.** Pick the target model from your scoped models, or from the available models if none are scoped. The active model is listed first. The session model is never changed.
+3. **Cost confirmation.** Nothing calls a model until you confirm the run: 4 completions, for the source baseline plus three pattern variants.
+4. **Progress.** In the TUI, a bordered loader shows progress and Escape cancels the run. Cancelled or failed runs leave the editor untouched.
+5. **Review.** A ranked summary lists each candidate's score, pass/fail, latency, tokens, cost (`n/a` when unknown), and a line diff against the source. Pick a candidate, edit it, then confirm to replace the editor text. You can instead keep the current text, or cancel at any step, and nothing changes.
+
+The command never auto-submits. After a replacement, you review and submit the editor text yourself. RPC mode is supported through dialogs, with progress reported through status and notifications and no interactive cancel. Print and JSON modes are unsupported and fail with a message pointing to the `arc-prompt` CLI.
+
 ## Releases
 
 Releases run automatically from `main` with semantic-release. Use Conventional Commits so changes can be versioned correctly:
