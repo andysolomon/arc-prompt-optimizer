@@ -1,0 +1,58 @@
+prompt-optimizer - Prompt Optimizer for ARC Pi - Progress
+Generated: 2026-08-29 14:33:46 EDT
+Plan: docs/prompt-optimizer-IMPLEMENTATION_PLAN.md
+Status: Phases 1 and 2 and Phase 3.1, Phase 3.2, and bounded Phase 3.3 CLI contract with final CLI hardening complete; bounded CLI portions formerly listed under 3.4/3.5 are absorbed into Phase 3.3; remaining later 3.4/3.5 work and Phases 4-6 not started.
+Approved Phase 1 contract: d45c63a5-134a-4b11-a319-2eea60602e55
+Approved Phase 1 follow-up contract: 0e71c607-dbbf-469a-8c97-8d4e52067f75
+Approved Phase 1 final hardening: d6beba0b-eb53-4168-9bd1-663559f358d7
+Phase 1 follow-up applied: bounded canonical serialization, strict own-field validation, and bounded criteria inputs.
+Phase 1 final hardening applied: own-field/prototype safety, hidden allowed fields, and pre-sort container bounds.
+Phase 2 applied 2026-08-29: src/core/evaluation.ts, judge.ts, ranking.ts, optimize.ts; fixtures/weighted-suites.json; test/engine.test.mjs.
+Phase 2 bounds: MAX_CRITERION_WEIGHT 1,000; MAX_CUSTOM_CRITERIA 64; MAX_JSON_SHAPE_KEYS 64; MAX_CANDIDATE_SPECS 16; MAX_CONSTRAINT_VARIANTS 4; MAX_CONSTRAINT_CHARACTERS 2,048 raw characters per constraint before escaping; MAX_EVALUATION_CANDIDATES 32; MAX_EVALUATION_CASES 64; MAX_EVALUATION_COMPLETIONS 256; MAX_CASE_INPUT_CHARACTERS 16,384 characters for each case input/expectedOutput/judgeRubric; MAX_EVALUATION_PROMPT_CHARACTERS 48,000 characters after candidate/case-input escaping; MAX_JUDGE_DATA_CHARACTERS 16,384 per section; MAX_JUDGE_PROMPT_CHARACTERS 48,000; MAX_JUDGE_RAW_OUTPUT_CHARACTERS 8,192; MAX_JUDGE_RATIONALE_CHARACTERS 2,000.
+Phase 2 correction: generated escaped constraint variants and every candidate/case completion prompt are preflighted before any completion call; ranking uses combined weighted quality only, then configured operational tie-breakers and candidate id.
+Phase 3.1 applied 2026-09-02: src/adapters/completion.ts and index.ts define the provider-neutral CompletionAdapter contract, optional model/measurement fields, strict request/result normalization, AbortSignal cancellation, bounded timeout handling, stable cancellation/timeout errors, and public exports. Core evaluation and the fixture adapter propagate the contract without provider-specific payloads.
+Phase 3.2 applied 2026-09-02: src/adapters/pi-completion.ts and index.ts add PiCompletionAdapter on Pi 0.84.4 ModelRegistry/ModelRuntime.complete APIs with provider-neutral mapping, default/explicit model resolution (ambiguous vs unknown), defaultModel validation, registry modelScope, context construction, cacheRetention none, conservative maxTokens budgeting, Phase 3.1 OUTPUT_TOO_LARGE validation without silent truncation, response-model mapping, valid empty text, abort-priority cancellation, usage/cost/latency mapping, and stable provider errors. Runtime deps @earendil-works/pi-coding-agent and @earendil-works/pi-ai ^0.84.4 with type-only Pi imports; credential-free coverage in test/pi-adapter.test.mjs.
+Phase 3.3 applied 2026-09-03; final CLI hardening 2026-09-04: bin/arc-prompt and src/cli/** add a scriptable arc-prompt CLI with patterns, models, evaluate, and optimize subcommands. Top-level --help/-h and subcommand --help write help to stdout. Prompt input is accepted from exactly one of --prompt, --prompt-file, or stdin and rejects ambiguous, empty, and >16,384 UTF-16-character input before adapter setup; stdin and prompt-file reads are bounded to that CLI cap. Evaluation suites stream from --suite JSON with an 8 MiB cap and empty/invalid suites fail as exit-2 user-input errors before adapter setup. --simulate uses an in-memory adapter and models list without importing live Pi runtime code; the default Pi registry path is lazy. --model/--default-model are bounded, --concurrency is bounded to 1..16, and completion timeout is enforced through completeWithTimeout via --timeout or the compatibility alias --timeout-ms. CLI option validation, including duplicate --output, runs before non-simulated Pi registry/runtime creation. --json uses deterministic recursively key-sorted redacted output with an 8 MiB cap including the trailing newline, stdout omits raw prompt/response by default, and --output writes full JSON explicitly with the same newline-inclusive cap. Evaluation scheduling stops after the first failure, including undefined rejections, and aborts in-flight completions. Human output separates heuristic, judge, and operational metric tables. Package metadata includes the existing bin and dist files for dry-run packaging. The bounded CLI portions formerly listed under checklist items 3.4 and 3.5 are absorbed into Phase 3.3; separate later 3.4/3.5 work remains not started. Credential-free CLI coverage lives in test/cli.test.mjs.
+Phase 3.1 bounds: MAX_COMPLETION_MODEL_CHARACTERS 256; MAX_COMPLETION_PROMPT_CHARACTERS 48,000; MAX_COMPLETION_OUTPUT_CHARACTERS 16,384; DEFAULT_COMPLETION_TIMEOUT_MS 30,000; MAX_COMPLETION_TIMEOUT_MS 2,147,483,647. Missing metrics remain unknown; unsafe token totals are unknown rather than overflowing.
+On completion, move this file and the plan to docs/archive/.
+
+[x] 1.0 - Phase 1 - Pure foundation and offline fixtures
+    [x] 1.1 - Define core prompt, pattern, candidate, evaluation, adapter, and result types under src/core/
+    [x] 1.2 - Port the useful prompt-pattern catalog into reusable, side-effect-free modules
+    [x] 1.3 - Add strict template validation, bounded input handling, and deterministic serialization
+    [x] 1.4 - Add offline simulated adapters and representative evaluation fixtures
+    [x] 1.5 - Add unit tests that do not use simulated text as a quality signal
+
+[x] 2.0 - Phase 2 - Evaluation and optimization engine
+    [x] 2.1 - Implement deterministic criteria and per-case evaluation results (evaluateOutput/evaluateCase/evaluateSuite, weighted checks, null score for empty criteria)
+    [x] 2.2 - Implement bounded candidate generation/search and provenance tracking (generateCandidates: specs x constraint variants, fingerprint ids, parent links, hard budgets)
+    [x] 2.3 - Add optional bounded semantic-judge adapter with structured-output validation (buildJudgeRequest escaped <judge_data> delimiters, parseJudgment strict {score,rationale}, runSemanticJudge never throws)
+    [x] 2.4 - Implement documented quality/cost/latency ranking and unknown-measurement handling (Measurement measured/unknown, rankCandidates total order, competition ranks, tiedWith/tieBrokenBy)
+    [x] 2.5 - Add malformed-judge, injection-like input, tie, and regression tests (test/engine.test.mjs, 21 tests; all Phase 1 tests unchanged and passing)
+
+[ ] 3.0 - Phase 3 - Real completion adapter and scriptable CLI
+    [x] 3.1 - Define the provider-neutral completion adapter and cancellation/timeout contract
+    [x] 3.2 - Implement the Pi-compatible real-model adapter without duplicating provider payload formatters
+    [x] 3.3 - Add bin/arc-prompt with patterns, evaluate, optimize, and bounded CLI portions absorbed from 3.4/3.5
+    [ ] 3.4 - Later work not started; bounded stdin/file/model/suite, --simulate, concurrency, and --json CLI scope was absorbed into 3.3
+    [ ] 3.5 - Later work not started; credential-free CLI and packaging smoke coverage for the bounded CLI scope was absorbed into 3.3
+
+[ ] 4.0 - Phase 4 - Pi package and interactive extension
+    [ ] 4.1 - Add Pi package metadata and an isolated prompt-optimizer extension entrypoint
+    [ ] 4.2 - Implement explicit /prompt-optimize source selection and candidate generation
+    [ ] 4.3 - Add model selection, BorderedLoader/custom UI progress, and cancellation
+    [ ] 4.4 - Add candidate comparison, editor review, explicit acceptance, and no-auto-submit behavior
+    [ ] 4.5 - Add TUI/RPC/non-interactive mode handling and extension tests
+
+[ ] 5.0 - Phase 5 - Packaging, ARC Pi integration verification, and hardening
+    [ ] 5.1 - Document standalone CLI and Pi-package installation in an ARC Pi isolated profile
+    [ ] 5.2 - Verify clean package contents, runtime dependencies, and npm pack/install behavior
+    [ ] 5.3 - Run fake-provider/in-memory integration checks against the local arc-pi checkout
+    [ ] 5.4 - Add privacy, credential-boundary, output-limit, cancellation, and no-interception checks
+    [ ] 5.5 - Add user documentation for evaluation suites, score interpretation, and Pi-vs-ARC model boundaries
+    [ ] 5.6 - Decide whether prebundling into ARC Pi is a separate follow-up rather than part of the first release
+
+[ ] 6.0 - Ship and archive
+    [ ] 6.1 - Run the complete applicable verification suite and review all acceptance criteria
+    [ ] 6.2 - Obtain explicit release/merge approval and record the final verification evidence
+    [ ] 6.3 - On completion, move docs/prompt-optimizer-IMPLEMENTATION_PLAN.md and docs/prompt-optimizer-progress.txt to docs/archive/
