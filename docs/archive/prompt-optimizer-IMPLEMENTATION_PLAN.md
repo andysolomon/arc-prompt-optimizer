@@ -1,6 +1,6 @@
 # Prompt Optimizer — Implementation Plan
 
-**Status:** Phases 1 and 2 and Phase 3.1, Phase 3.2, and bounded Phase 3.3 CLI contract with final CLI hardening complete; bounded CLI portions formerly listed under 3.4/3.5 are absorbed into Phase 3.3; remaining later 3.4/3.5 work, Phases 4–5, and ship/archive not started
+**Status:** Phases 1–5 and 7 complete (3.4/3.5 closed as absorbed into 3.3); Phase 6.1 verification complete (`docs/phase-6-ship-archive/verification.md`); 6.2 release approved and 6.3 archived to `docs/archive/`. All phases complete
 **Approved Phase 1 contract:** `d45c63a5-134a-4b11-a319-2eea60602e55`
 **Approved Phase 1 follow-up:** `0e71c607-dbbf-469a-8c97-8d4e52067f75`
 **Approved Phase 1 final hardening:** `d6beba0b-eb53-4168-9bd1-663559f358d7`

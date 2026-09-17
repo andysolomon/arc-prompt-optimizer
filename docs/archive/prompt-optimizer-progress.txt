@@ -1,7 +1,7 @@
 prompt-optimizer - Prompt Optimizer for ARC Pi - Progress
 Generated: 2026-08-29 14:33:46 EDT
 Plan: docs/prompt-optimizer-IMPLEMENTATION_PLAN.md
-Status: Phases 1 and 2 and Phase 3.1, Phase 3.2, and bounded Phase 3.3 CLI contract with final CLI hardening complete; bounded CLI portions formerly listed under 3.4/3.5 are absorbed into Phase 3.3; Phase 4 Pi package and interactive extension complete (4.1-4.5); Phase 5 packaging, ARC Pi verification, and hardening complete (5.1-5.6); remaining later 3.4/3.5 work and Phase 6 not started.
+Status: Phases 1 and 2 and Phase 3.1, Phase 3.2, and bounded Phase 3.3 CLI contract with final CLI hardening complete; bounded CLI portions formerly listed under 3.4/3.5 are absorbed into Phase 3.3; Phase 4 Pi package and interactive extension complete (4.1-4.5); Phase 5 packaging, ARC Pi verification, and hardening complete (5.1-5.6); Phase 7 harness-agnostic skill and Claude Code plugin complete (7.1-7.6); 3.4/3.5 closed as absorbed; Phase 6 ship and archive complete (6.1-6.3). All phases complete; this file and the plan are archived in docs/archive/.
 Approved Phase 1 contract: d45c63a5-134a-4b11-a319-2eea60602e55
 Approved Phase 1 follow-up contract: 0e71c607-dbbf-469a-8c97-8d4e52067f75
 Approved Phase 1 final hardening: d6beba0b-eb53-4168-9bd1-663559f358d7
@@ -18,7 +18,8 @@ Phase 4.2-4.5 applied 2026-09-16: src/extension/source.ts resolves the prompt so
 Phase 5 applied 2026-09-16: package.json engines.node >=22.19.0; test/package.test.mjs (pack allowlist, manifest paths, runtime deps, clean-extract CLI + extension smoke); scripts/verify-arc-pi.mjs (opt-in npm run verify:arc-pi, ARC Pi 1.47.0 / Pi 0.80.7, fake provider, no network, isolated temp profile); Pi 0.80 completion fallback (getApiKeyAndHeaders + pi-ai/compat, test/pi-compat.test.mjs); test/privacy.test.mjs; README Installation, docs/user-guide.md, docs/phase-5-packaging-hardening/prebundling-decision.md (prebundling deferred) and verification.md (npm test 158/158, verify:arc-pi ok). Git installs unsupported. Remaining manual check: live TUI run with a real model.
 Phase 3.1 bounds: MAX_COMPLETION_MODEL_CHARACTERS 256; MAX_COMPLETION_PROMPT_CHARACTERS 48,000; MAX_COMPLETION_OUTPUT_CHARACTERS 16,384; DEFAULT_COMPLETION_TIMEOUT_MS 30,000; MAX_COMPLETION_TIMEOUT_MS 2,147,483,647. Missing metrics remain unknown; unsafe token totals are unknown rather than overflowing.
 Phase 7 applied 2026-09-17: model- and harness-agnostic workflow. Step A: src/core/preview.ts shared candidate set; arc-prompt candidates and score (model-free, deterministic; src/cli/harness.ts; test/cli-harness.test.mjs). Step B: src/cli/harness-main.ts is a Pi-free entry for candidates/score reused by arc-prompt; scripts/build-skill-tools.mjs (run by npm run build after tsc) writes the committed, dependency-free skills/prompt-optimize/scripts/arc-prompt-tools.mjs plus lib/*.mjs; skills/prompt-optimize/SKILL.md; Claude Code plugin (.claude-plugin/plugin.json, marketplace.json, commands/prompt-optimize.md); package.json files + pi.skills; plugin.json version synced by the npm version lifecycle (scripts/sync-plugin-version.mjs) and added to @semantic-release/git assets; test/skill-tools.test.mjs (drift check, out-of-repo run) and test/plugin-manifest.test.mjs; README and docs/user-guide.md harness-agnostic sections.
-On completion, move this file and the plan to docs/archive/.
+Phase 6.1 applied 2026-09-17: docs/phase-6-ship-archive/verification.md (v0.5.0; typecheck ok; npm test 176/176; verify:arc-pi ok on ARC Pi 1.47.0 / Pi 0.80.7; claude plugin validate ok; npm pack 171 files; acceptance criteria reviewed). Open manual checks: live real-model /prompt-optimize run in Pi/ARC Pi and live Claude Code plugin run.
+Phase 6.2-6.3 applied 2026-09-17: release/merge approved by the user ("ship it"); evidence recorded in docs/phase-6-ship-archive/verification.md; this file and the plan moved to docs/archive/ (test/engine.test.mjs doc-bounds paths updated).
 
 [x] 1.0 - Phase 1 - Pure foundation and offline fixtures
     [x] 1.1 - Define core prompt, pattern, candidate, evaluation, adapter, and result types under src/core/
@@ -34,12 +35,12 @@ On completion, move this file and the plan to docs/archive/.
     [x] 2.4 - Implement documented quality/cost/latency ranking and unknown-measurement handling (Measurement measured/unknown, rankCandidates total order, competition ranks, tiedWith/tieBrokenBy)
     [x] 2.5 - Add malformed-judge, injection-like input, tie, and regression tests (test/engine.test.mjs, 21 tests; all Phase 1 tests unchanged and passing)
 
-[ ] 3.0 - Phase 3 - Real completion adapter and scriptable CLI
+[x] 3.0 - Phase 3 - Real completion adapter and scriptable CLI
     [x] 3.1 - Define the provider-neutral completion adapter and cancellation/timeout contract
     [x] 3.2 - Implement the Pi-compatible real-model adapter without duplicating provider payload formatters
     [x] 3.3 - Add bin/arc-prompt with patterns, evaluate, optimize, and bounded CLI portions absorbed from 3.4/3.5
-    [ ] 3.4 - Later work not started; bounded stdin/file/model/suite, --simulate, concurrency, and --json CLI scope was absorbed into 3.3
-    [ ] 3.5 - Later work not started; credential-free CLI and packaging smoke coverage for the bounded CLI scope was absorbed into 3.3
+    [x] 3.4 - Closed in Phase 6.1 as absorbed; bounded stdin/file/model/suite, --simulate, concurrency, and --json CLI scope was absorbed into 3.3
+    [x] 3.5 - Closed in Phase 6.1 as absorbed; credential-free CLI and packaging smoke coverage for the bounded CLI scope was absorbed into 3.3
 
 [x] 4.0 - Phase 4 - Pi package and interactive extension
     [x] 4.1 - Add Pi package metadata and an isolated prompt-optimizer extension entrypoint
@@ -56,10 +57,10 @@ On completion, move this file and the plan to docs/archive/.
     [x] 5.5 - Add user documentation for evaluation suites, score interpretation, and Pi-vs-ARC model boundaries
     [x] 5.6 - Decide whether prebundling into ARC Pi is a separate follow-up rather than part of the first release
 
-[ ] 6.0 - Ship and archive
-    [ ] 6.1 - Run the complete applicable verification suite and review all acceptance criteria
-    [ ] 6.2 - Obtain explicit release/merge approval and record the final verification evidence
-    [ ] 6.3 - On completion, move docs/prompt-optimizer-IMPLEMENTATION_PLAN.md and docs/prompt-optimizer-progress.txt to docs/archive/
+[x] 6.0 - Ship and archive
+    [x] 6.1 - Run the complete applicable verification suite and review all acceptance criteria
+    [x] 6.2 - Obtain explicit release/merge approval and record the final verification evidence
+    [x] 6.3 - On completion, move docs/prompt-optimizer-IMPLEMENTATION_PLAN.md and docs/prompt-optimizer-progress.txt to docs/archive/
 
 [x] 7.0 - Phase 7 - Model- and harness-agnostic skill, Claude Code plugin, and model-free CLI tools
     [x] 7.1 - Share the preview candidate set and add model-free arc-prompt candidates and score commands
