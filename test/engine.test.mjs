@@ -701,8 +701,8 @@ test("documented Phase 2 safety bounds match the exported constants", async () =
   ];
   for (const filename of [
     "README.md",
-    "docs/prompt-optimizer-progress.txt",
-    "docs/prompt-optimizer-IMPLEMENTATION_PLAN.md",
+    "docs/archive/prompt-optimizer-progress.txt",
+    "docs/archive/prompt-optimizer-IMPLEMENTATION_PLAN.md",
   ]) {
     const text = await readFile(new URL(filename, rootUrl), "utf8");
     for (const [name, value] of bounds) {
