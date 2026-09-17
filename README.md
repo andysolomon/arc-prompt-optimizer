@@ -6,6 +6,40 @@ Most people write prompts like they are texting a friend. Then they wonder why a
 
 The package is not published to npm (`private: true`). Install it from a local clone or from a tarball you pack yourself. It requires Node.js 22.19.0 or newer. See [docs/user-guide.md](docs/user-guide.md) for suite authoring, score interpretation, and model boundaries.
 
+### Use it in any agent harness
+
+The `prompt-optimize` skill works in any agent harness that loads [Agent Skills](https://agentskills.io). The harness's own agent generates candidate outputs with whatever model and auth it already has. The bundled tool at `skills/prompt-optimize/scripts/arc-prompt-tools.mjs` only renders candidates and scores outputs. It makes no model or network calls, needs only Node.js 22.19.0 or newer, and has no npm dependencies, so it runs from a plain git checkout without `npm ci` or a build.
+
+**Claude Code plugin**
+
+```text
+/plugin marketplace add andysolomon/arc-prompt-optimizer
+/plugin install arc-prompt-optimizer@arc-prompt-optimizer
+/prompt-optimize Summarize this incident report for executives.
+```
+
+The plugin provides the `prompt-optimize` skill, which Claude can also pick on its own when you ask it to improve a prompt, and a `/prompt-optimize <prompt>` command.
+
+**Other skills-capable harnesses**
+
+Copy or symlink `skills/prompt-optimize` from a clone into your harness's skills directory, for example `~/.claude/skills/` for Claude Code without the plugin, or `~/.codex/skills/` for Codex. For other harnesses, see their docs for where skills live. Keep the whole directory, including `scripts/`.
+
+```sh
+git clone https://github.com/andysolomon/arc-prompt-optimizer.git
+mkdir -p ~/.codex/skills
+ln -s "$PWD/arc-prompt-optimizer/skills/prompt-optimize" ~/.codex/skills/prompt-optimize
+```
+
+**Pi**
+
+A Pi install (see [Pi package](#pi-package)) provides both the native `/prompt-optimize` extension, which runs candidates through a Pi model you pick, and the same skill through the `pi.skills` manifest.
+
+**Plain CLI**
+
+`arc-prompt candidates` and `arc-prompt score` are the same model-free commands, for scripts or harnesses without skills support. Run `arc-prompt candidates --help` and `arc-prompt score --help` for flags and the outputs JSON schema.
+
+The harness workflow has trade-offs. The same agent writes the variants and produces their outputs, scores come from deterministic checks only, the default preview suite only checks that outputs are non-empty, and latency, tokens, and cost stay unknown unless the harness reports them. See [docs/user-guide.md](docs/user-guide.md#harness-agnostic-workflow).
+
 ### Standalone CLI
 
 ```sh

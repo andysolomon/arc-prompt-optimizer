@@ -1,0 +1,14 @@
+{
+  "name": "arc-prompt-optimizer",
+  "owner": {
+    "name": "andysolomon"
+  },
+  "description": "Model- and harness-agnostic prompt optimization for Claude Code.",
+  "plugins": [
+    {
+      "name": "arc-prompt-optimizer",
+      "source": "./",
+      "description": "Optimize a prompt with any model: render critique, decomposition, and structured reasoning variants, run them with the current agent, and rank them with deterministic checks."
+    }
+  ]
+}

@@ -1,13 +1,13 @@
 import { CliError } from "./errors.js";
 
-export type CliCommand = "optimize" | "evaluate" | "patterns" | "models";
+export type CliCommand = "optimize" | "evaluate" | "patterns" | "models" | "candidates" | "score";
 
 export interface ParsedArgs {
   readonly command: CliCommand;
   readonly flags: ReadonlyMap<string, readonly string[]>;
 }
 
-const COMMANDS = new Set<CliCommand>(["optimize", "evaluate", "patterns", "models"]);
+const COMMANDS = new Set<CliCommand>(["optimize", "evaluate", "patterns", "models", "candidates", "score"]);
 const BOOLEAN_FLAGS = new Set(["json", "simulate", "help"]);
 const VALUE_FLAGS = new Set([
   "prompt",
@@ -19,13 +19,18 @@ const VALUE_FLAGS = new Set([
   "timeout",
   "timeout-ms",
   "output",
+  "outputs",
 ]);
 
+const OPTIMIZE_FLAGS = [...BOOLEAN_FLAGS, ...VALUE_FLAGS].filter((flag) => flag !== "outputs");
+
 const COMMAND_FLAGS: Readonly<Record<CliCommand, ReadonlySet<string>>> = Object.freeze({
-  optimize: new Set([...BOOLEAN_FLAGS, ...VALUE_FLAGS]),
-  evaluate: new Set([...BOOLEAN_FLAGS, ...VALUE_FLAGS]),
+  optimize: new Set(OPTIMIZE_FLAGS),
+  evaluate: new Set(OPTIMIZE_FLAGS),
   patterns: new Set(["json", "help"]),
   models: new Set(["json", "simulate", "help"]),
+  candidates: new Set(["json", "help", "prompt", "prompt-file"]),
+  score: new Set(["json", "help", "suite", "outputs"]),
 });
 
 function isCommand(value: string): value is CliCommand {
@@ -41,7 +46,7 @@ function pushFlag(flags: Map<string, string[]>, name: string, value: string): vo
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   const [commandValue, ...rest] = argv;
   if (commandValue === undefined || commandValue === "--help" || commandValue === "-h") {
-    throw new CliError("MISSING_ARGUMENT", "Usage: arc-prompt <optimize|evaluate|patterns|models> [options]");
+    throw new CliError("MISSING_ARGUMENT", "Usage: arc-prompt <optimize|evaluate|patterns|models|candidates|score> [options]");
   }
   if (!isCommand(commandValue)) {
     throw new CliError("INVALID_ARGUMENT", `Unknown command '${commandValue}'.`);

@@ -39,7 +39,7 @@ function fakeContext(mode, hasUI) {
 test("package manifest declares a Pi package whose extension entrypoint is built", async () => {
   const packageJson = JSON.parse(await readFile(new URL("package.json", rootUrl), "utf8"));
   assert.ok(packageJson.keywords.includes("pi-package"));
-  assert.deepEqual(packageJson.pi, { extensions: ["./dist/extension/index.js"] });
+  assert.deepEqual(packageJson.pi, { extensions: ["./dist/extension/index.js"], skills: ["./skills"] });
   assert.equal(packageJson.exports["./extension"].import, "./dist/extension/index.js");
   assert.ok(packageJson.files.includes("dist/**"));
   assert.ok((await stat(new URL("dist/extension/index.js", rootUrl))).isFile());

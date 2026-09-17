@@ -33,16 +33,27 @@ async function packJson(args) {
 
 const relative = (path) => path.replace(/^\.\//u, "");
 
-test("the packed tarball ships only the CLI, built dist, and package metadata", async () => {
+const ALLOWED_PREFIXES = ["dist/", "skills/prompt-optimize/", ".claude-plugin/", "commands/"];
+
+test("the packed tarball ships only the CLI, built dist, skill, plugin manifests, and package metadata", async () => {
   const packageJson = JSON.parse(await readFile(join(rootPath, "package.json"), "utf8"));
   const pack = await packJson(["--dry-run"]);
   const files = pack.files.map((file) => file.path).sort();
 
   for (const file of files) {
-    assert.ok(file.startsWith("dist/") || ALLOWED_TOP_LEVEL.has(file), `unexpected packed file ${file}`);
+    assert.ok(ALLOWED_PREFIXES.some((prefix) => file.startsWith(prefix)) || ALLOWED_TOP_LEVEL.has(file), `unexpected packed file ${file}`);
     assert.doesNotMatch(file, FORBIDDEN, `forbidden packed file ${file}`);
   }
-  for (const required of ["bin/arc-prompt", "package.json", "README.md"]) {
+  for (const required of [
+    "bin/arc-prompt",
+    "package.json",
+    "README.md",
+    "skills/prompt-optimize/SKILL.md",
+    "skills/prompt-optimize/scripts/arc-prompt-tools.mjs",
+    ".claude-plugin/plugin.json",
+    ".claude-plugin/marketplace.json",
+    "commands/prompt-optimize.md",
+  ]) {
     assert.ok(files.includes(required), `${required} is packed`);
   }
 
@@ -56,6 +67,11 @@ test("the packed tarball ships only the CLI, built dist, and package metadata", 
   for (const target of manifestTargets) {
     assert.ok(files.includes(target), `manifest target ${target} is packed`);
   }
+  assert.deepEqual(packageJson.pi.skills, ["./skills"]);
+  for (const skillDir of packageJson.pi.skills.map(relative)) {
+    assert.ok(files.some((file) => file.startsWith(`${skillDir}/`) && file.endsWith("/SKILL.md")), `pi skill dir ${skillDir} is packed`);
+  }
+  assert.equal(files.some((file) => /\.(?:map|d\.ts)$/u.test(file) && !file.startsWith("dist/")), false, "no maps or declarations outside dist");
 
   assert.equal(packageJson.private, true);
   assert.deepEqual(packageJson.engines, { node: ">=22.19.0" });

@@ -17,7 +17,16 @@ import { hasFlag, integerFlag, parseArgs, singleFlag, type ParsedArgs } from "./
 import { listDefaultPiModels, selectAdapter } from "./adapters.js";
 import { CliError } from "./errors.js";
 import { evaluateCandidatesBounded } from "./evaluate.js";
-import { MAX_CLI_PROMPT_CHARACTERS, type CliIo, loadPrompt, loadSuite, validateOutputFlag, writeJsonOutput, writeStream } from "./io.js";
+import { CANDIDATES_HELP, SCORE_HELP, commandCandidates, commandScore } from "./harness-main.js";
+import {
+  MAX_CLI_PROMPT_CHARACTERS,
+  type CliIo,
+  loadPrompt,
+  loadSuite,
+  validateOutputFlag,
+  writeJsonOutput,
+  writeStream,
+} from "./io.js";
 import {
   formatEvaluationText,
   formatJson,
@@ -47,6 +56,8 @@ Commands:
   evaluate   Evaluate one prompt against a suite.
   patterns   List the offline prompt pattern catalog.
   models     List available models.
+  candidates Print the baseline and pattern prompt candidates (no model calls).
+  score      Score harness-produced candidate outputs deterministically (no model calls).
 
 Common options:
   --json                    Emit canonical JSON.
@@ -123,6 +134,8 @@ Options:
   --simulate                Use the credential-free simulated catalog.
   -h, --help                Show help.
 `,
+  candidates: CANDIDATES_HELP,
+  score: SCORE_HELP,
 };
 
 function defaultIo(): CliIo {
@@ -317,6 +330,10 @@ export async function runCli(options: RunCliOptions = {}): Promise<number> {
         return await commandEvaluate(args, io);
       case "optimize":
         return await commandOptimize(args, io);
+      case "candidates":
+        return await commandCandidates(args, io);
+      case "score":
+        return await commandScore(args, io);
     }
   } catch (error) {
     if (error instanceof CliError) {

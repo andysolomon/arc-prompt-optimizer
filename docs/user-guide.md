@@ -1,6 +1,62 @@
 # Arc Prompt Optimizer user guide
 
-This guide covers writing evaluation suites, reading scores, choosing models, where Pi Providers end and ARC Worker Routes begin, and the privacy and safety behavior. For installation, see the README's [Installation](../README.md#installation) section.
+This guide covers the harness-agnostic skill workflow, writing evaluation suites, reading scores, choosing models, where Pi Providers end and ARC Worker Routes begin, and the privacy and safety behavior. For installation, see the README's [Installation](../README.md#installation) section.
+
+## Harness-agnostic workflow
+
+The `prompt-optimize` skill (`skills/prompt-optimize/SKILL.md`) lets any skills-capable agent harness run the optimization with its own model. It ships as a Claude Code plugin, through Pi's `pi.skills` manifest, and as a plain directory you can copy into other harnesses. See the README's [Use it in any agent harness](../README.md#use-it-in-any-agent-harness) for installation.
+
+### Steps
+
+1. The agent writes the prompt you supply (pasted text or a file you name) to a temporary file. It reads no other project files.
+2. It renders candidates with no model call:
+
+   ```sh
+   node <skill-dir>/scripts/arc-prompt-tools.mjs candidates --prompt-file prompt.txt --json </dev/null
+   ```
+
+   The result is `{"candidates":[{"id","pattern","prompt"}]}`: the `baseline` prompt plus `critique`, `decomposition`, and `chain_of_thought` variants. Ids are stable for a given prompt. This is the same candidate set the Pi extension uses.
+3. It states the cost (4 generations with the current agent model) and waits for your confirmation.
+4. It produces one output per candidate, preferably in an isolated subagent or fresh context per candidate. Otherwise it answers each candidate independently.
+5. It writes an outputs file and scores it with no model call:
+
+   ```sh
+   node <skill-dir>/scripts/arc-prompt-tools.mjs score --outputs outputs.json --json </dev/null
+   ```
+
+   Add `--suite <file.json>` to score against your own suite instead of the preview suite.
+6. It shows a ranked table, a line diff of each variant against the original, and the caveats below.
+7. You pick and optionally edit a candidate. The agent shows the final prompt. It never submits the prompt, never overwrites a file without your explicit approval, and deletes its temporary files.
+
+`arc-prompt-tools.mjs` accepts exactly the `candidates` and `score` flags of `arc-prompt` and prints the same output. Like the CLI, it reads stdin whenever stdin is not a terminal, so redirect `</dev/null` when you pass files. If Node.js is unavailable, the skill rewrites the prompt into the three patterns by hand, checks only that outputs are non-empty, and reports that scores are unavailable.
+
+### Outputs JSON
+
+```json
+{
+  "candidates": [
+    {
+      "id": "baseline-a07402d9",
+      "prompt": "optional candidate prompt text",
+      "outputs": { "preview": "output text" },
+      "measurements": { "preview": { "latencyMs": 1200, "inputTokens": 40, "outputTokens": 180, "costUsd": 0.0004 } }
+    }
+  ]
+}
+```
+
+- Unknown keys are rejected at every level.
+- `id` must match `[A-Za-z0-9][A-Za-z0-9_.-]*`, be at most 128 characters, and be unique.
+- `outputs` needs exactly one string per suite case id. The default preview suite `prompt-optimize-preview` has one case, `preview`, which passes when the output is non-empty.
+- `measurements` is optional per candidate and per case. Each field is optional. Token counts and `latencyMs` are non-negative safe integers, and `costUsd` is a non-negative finite number. Missing values are reported as unknown, never zero.
+- Limits: 32 candidates, 256 scored outputs (candidates × cases), 16,384 characters per output, 48,000 characters per optional prompt, and 8 MiB of outputs JSON.
+
+### Trade-offs
+
+- **Less independent.** The same agent writes the variants and produces their outputs. Separate model calls, as in the Pi extension or `arc-prompt optimize`, are more independent.
+- **Deterministic checks only.** No semantic judge runs. With the preview suite, every non-empty output scores 1, so the ranking mostly reflects whatever measurements the harness reported. Use a suite for a meaningful comparison.
+- **Measurements are usually unknown.** Most harnesses do not report per-response latency, tokens, or cost. The skill never estimates them.
+- **No editor integration.** Outside Pi, the skill cannot replace your editor text. It shows the chosen prompt for you to copy.
 
 ## Evaluation suites
 
@@ -131,6 +187,7 @@ Every prompt is length-checked before the first completion runs.
 - **Judge weight defaults to 0.** A judge score, when present, is reported but cannot change the order. The CLI and the extension run no judge, so their judge column is unknown.
 - **What a high score means.** A high score means the output passed *these deterministic checks* on *these cases* with *this model* at *this time*. It does not show that one prompt is better in general, that one model is better, or that results carry over to other inputs. Suites are small and completions are not deterministic, so a one-case difference can flip between runs.
 - **`--simulate` scores measure nothing about prompts.** The simulated adapter ignores the prompt and returns canned text chosen by `completionFixtureId`.
+- **Harness-produced scores are deterministic checks on agent-written outputs.** `arc-prompt score` and the skill tool never call a model. See [Harness-agnostic workflow](#harness-agnostic-workflow) for trade-offs.
 - **The `/prompt-optimize` preview ranking is mostly operational.** Its built-in suite has one case whose only criterion is `minCharacters: 1` (non-empty output). Any non-empty reply scores 1, so ranking falls through to tokens, latency, and cost. Treat the review step as a side-by-side reading aid, not a quality verdict.
 
 ## Model selection
@@ -189,7 +246,8 @@ This project does **not** claim any of the following:
 - That results rank model quality, or that scores are comparable across models, providers, or runs.
 - That Pi Provider results predict behavior on ARC Worker Routes (Codex, Cursor Agent, Claude Code, Composer), or that it compares those routes at all.
 - That `--simulate` output reflects any real model behavior.
-- That the `/prompt-optimize` preview ranking measures quality. Its suite only checks for non-empty output.
+- That the `/prompt-optimize` preview ranking measures quality. Its suite only checks for non-empty output. The same applies to the skill and `arc-prompt score` without `--suite`.
+- That skill results are independent model evaluations. The same agent writes the variants and produces their outputs.
 - That unknown cost or token values are zero, or that reported cost is a billing record.
 - That a semantic judge is used by the CLI or the extension (it is library-only and weighted 0 by default).
 - Support for git installs, npm registry installs, Pi hosts other than 0.84.x and ARC Pi's 0.80.7, or providers with a custom `streamSimple` on Pi 0.80.x.
