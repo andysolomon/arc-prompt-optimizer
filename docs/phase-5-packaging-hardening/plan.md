@@ -10,7 +10,7 @@ Workload class: medium-medium (implementation), docs as a second step.
 - [x] ~~A5 `test/privacy.test.mjs`: no default raw logging (no console/fs writes/process.env credential reads in `src/core`, `src/extension`); no `pi.on`/tool/shortcut/flag registrations (no automatic interception); bounded outputs (over-limit prompt refused, completion output limits enforced); cancellation leaves editor untouched and stops further completions; credential-like strings in prompts are never written to notify/status beyond the chosen candidate display.~~
 
 ## Step B — documentation
-- [ ] B1 README "Installation": standalone CLI, Pi package (local path/tarball), ARC Pi isolated profile, git-install limitation.
-- [ ] B2 `docs/user-guide.md`: evaluation-suite authoring, score interpretation, model selection, Pi Providers vs ARC Worker Routes, unsupported claims.
-- [ ] B3 `docs/phase-5-packaging-hardening/prebundling-decision.md` (5.6).
-- [ ] B4 Record ARC Pi verification evidence; update progress tracker.
+- [x] ~~B1 README "Installation": standalone CLI, Pi package (local path/tarball), ARC Pi isolated profile, git-install limitation.~~
+- [x] ~~B2 `docs/user-guide.md`: evaluation-suite authoring, score interpretation, model selection, Pi Providers vs ARC Worker Routes, unsupported claims.~~
+- [x] ~~B3 `docs/phase-5-packaging-hardening/prebundling-decision.md` (5.6).~~
+- [x] ~~B4 Record ARC Pi verification evidence; update progress tracker.~~
