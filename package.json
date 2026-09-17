@@ -24,10 +24,14 @@
       "import": "./dist/extension/index.js"
     }
   },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
+    "verify:arc-pi": "npm run build && node scripts/verify-arc-pi.mjs",
     "prepack": "npm run build",
     "release": "semantic-release"
   },
