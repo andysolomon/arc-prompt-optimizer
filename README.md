@@ -2,6 +2,91 @@
 
 Most people write prompts like they are texting a friend. Then they wonder why a 200-billion parameter model gives mediocre answers. Prompt engineering is not about tricks. It is about understanding that every token you send is an instruction, and the model follows instructions literally. Write better instructions, get better outputs. It is that simple and that hard.
 
+## Installation
+
+The package is not published to npm (`private: true`). Install it from a local clone or from a tarball you pack yourself. It requires Node.js 22.19.0 or newer. See [docs/user-guide.md](docs/user-guide.md) for suite authoring, score interpretation, and model boundaries.
+
+### Standalone CLI
+
+```sh
+git clone https://github.com/andysolomon/arc-prompt-optimizer.git
+cd arc-prompt-optimizer
+npm ci
+npm run build
+bin/arc-prompt --help
+```
+
+To put `arc-prompt` on your `PATH`, run `npm link` from the clone. Or pack a tarball and install that:
+
+```sh
+npm pack                                         # runs the build, writes arc-prompt-optimizer-<version>.tgz
+npm install -g ./arc-prompt-optimizer-<version>.tgz
+```
+
+The CLI needs `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` at runtime for real-model runs, so they are regular dependencies. `--simulate` runs without credentials or network access. For example, save this suite as `suite.json`:
+
+```json
+{
+  "id": "readme-example",
+  "cases": [
+    {
+      "id": "profile-json",
+      "name": "Profile is a JSON object",
+      "completionFixtureId": "json-profile",
+      "input": "Ada, engineer",
+      "criteria": {
+        "expectedFormat": "json",
+        "jsonShape": { "rootType": "object", "requiredKeys": ["name", "role"] },
+        "weights": { "json_shape": 3 },
+        "custom": [{ "id": "mentions-ada", "weight": 2, "kind": "includes", "value": "Ada", "caseSensitive": true }]
+      }
+    }
+  ]
+}
+```
+
+```sh
+arc-prompt patterns
+arc-prompt models --simulate
+arc-prompt optimize --simulate --suite suite.json --prompt "Return the user profile as JSON." </dev/null
+arc-prompt evaluate --simulate --suite suite.json --prompt "Return the user profile as JSON." --json </dev/null
+```
+
+The simulated adapter returns canned text selected by `completionFixtureId` and ignores the prompt, so simulated scores exercise the pipeline only. They say nothing about prompt quality. The CLI reads stdin whenever stdin is not a terminal, so redirect `</dev/null` when you pass `--prompt` or `--prompt-file` from a script. Otherwise the command waits for stdin to close.
+
+### Pi package
+
+Build first, because the extension manifest points at `dist/extension/index.js` and `dist/` is not committed:
+
+```sh
+npm ci && npm run build
+pi -e /abs/path/to/arc-prompt-optimizer          # load for one session
+pi install /abs/path/to/arc-prompt-optimizer     # add to Pi settings
+```
+
+To use a packed tarball, install the tarball with npm and point Pi at the installed directory. Do not pass the `.tgz` file to Pi, because Pi's extension loader cannot load a `.tgz` path:
+
+```sh
+npm install -g ./arc-prompt-optimizer-<version>.tgz
+pi install "$(npm root -g)/arc-prompt-optimizer"
+```
+
+Git installs (`pi install git:...`) are not supported. `dist/` is not committed, and Pi runs `npm install --omit=dev` for git sources, so the TypeScript build cannot run.
+
+### ARC Pi isolated profile
+
+```sh
+arc-pi install /abs/path/to/arc-prompt-optimizer
+arc-pi list
+```
+
+`arc-pi install` forwards to `pi install` with ARC Pi's isolated `PI_CODING_AGENT_DIR`. That directory defaults to `ARC_PI_HOME`, which defaults to `~/.arc-pi`. The package is recorded there, not in `~/.pi/agent`. No credentials are copied into or out of the profile. The extension uses whatever Pi providers the ARC Pi profile already has. Pi extensions run with full local permissions, so install only code you trust.
+
+Supported hosts:
+
+- Pi 0.84.x. The package depends on `^0.84.4` and its tests run against that version.
+- ARC Pi's Pi 0.80.7. `ARC_PI_DIR=/path/to/arc-pi npm run verify:arc-pi` checks it with a fake in-memory provider. On Pi 0.80.x the extension resolves its own `pi-ai` instance. Built-in API types work, but providers that other extensions register with a custom `streamSimple` are unavailable to `/prompt-optimize`.
+
 ## Offline core
 
 Phase 1 provides a side-effect-free TypeScript API for strict prompt-pattern rendering, bounded fixture completions, deterministic fixture checks, and canonical serialization. It does not call providers, submit prompts, persist content, or integrate with Pi or ARC workers.
@@ -116,7 +201,7 @@ Releases run automatically from `main` with semantic-release. Use Conventional C
 - `feat:` creates a minor release.
 - `feat!:` or a `BREAKING CHANGE:` footer creates a major release.
 
-The initial version is `0.1.0`. The GitHub Actions release workflow updates the package version and changelog, creates a GitHub release, and does not publish to npm. Preview a release locally with:
+Versions are still in the `0.x` range. The first release was `0.1.0`, and the current version is `0.3.0`. The GitHub Actions release workflow updates the package version and changelog, creates a GitHub release, and does not publish to npm. Preview a release locally with:
 
 ```sh
 npm ci

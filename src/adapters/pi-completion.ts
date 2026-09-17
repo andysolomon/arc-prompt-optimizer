@@ -217,14 +217,40 @@ export function mapPiAssistantMessage(
   return validateCompletionResult(result, outputLimit);
 }
 
+/** Registry surface of Pi hosts before `ModelRegistry.complete()` existed (e.g. Pi 0.80.x). */
+type LegacyModelRegistry = Pick<ModelRegistry, "getAll" | "getAvailable" | "getApiKeyAndHeaders">;
+
+/**
+ * Older Pi hosts resolve request auth on the registry and dispatch through the pi-ai compat
+ * entrypoint, which the host's extension loader aliases to its own copy.
+ */
+async function completeWithLegacyRegistry<TApi extends Api>(
+  registry: LegacyModelRegistry,
+  model: Model<TApi>,
+  context: Context,
+  streamOptions?: ModelsApiStreamOptions<TApi>,
+): Promise<AssistantMessage> {
+  const auth = await registry.getApiKeyAndHeaders(model as Model<Api>);
+  if (!auth.ok) throw new PiCompletionAdapterError(auth.error, "error");
+  const compat = await import("@earendil-works/pi-ai/compat");
+  const requestOptions: Record<string, unknown> = { ...streamOptions };
+  if (auth.apiKey !== undefined) requestOptions.apiKey = auth.apiKey;
+  if (auth.headers !== undefined) requestOptions.headers = auth.headers;
+  if (auth.env !== undefined) requestOptions.env = auth.env;
+  return await compat.complete(model, context, requestOptions as Parameters<typeof compat.complete>[2]);
+}
+
 export function createPiCompletionClientFromRegistry(
   registry: ModelRegistry,
   options?: { readonly modelScope?: PiCompletionModelScope },
 ): PiCompletionClient {
   const modelScope = options?.modelScope ?? "available";
+  const hasComplete = typeof (registry as Partial<ModelRegistry>).complete === "function";
   return {
     getModels: () => (modelScope === "all" ? registry.getAll() : registry.getAvailable()),
-    complete: (model, context, streamOptions) => registry.complete(model, context, streamOptions),
+    complete: hasComplete
+      ? (model, context, streamOptions) => registry.complete(model, context, streamOptions)
+      : (model, context, streamOptions) => completeWithLegacyRegistry(registry, model, context, streamOptions),
   };
 }
 
