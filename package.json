@@ -28,20 +28,27 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build-skill-tools.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
     "verify:arc-pi": "npm run build && node scripts/verify-arc-pi.mjs",
     "prepack": "npm run build",
+    "version": "node scripts/sync-plugin-version.mjs",
     "release": "semantic-release"
   },
   "files": [
     "bin/arc-prompt",
-    "dist/**"
+    "dist/**",
+    "skills/**",
+    ".claude-plugin/**",
+    "commands/**"
   ],
   "pi": {
     "extensions": [
       "./dist/extension/index.js"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "devDependencies": {

@@ -1,0 +1,10 @@
+{
+  "name": "arc-prompt-optimizer",
+  "description": "Optimize a prompt with any model: render critique, decomposition, and structured reasoning variants, run them with the current agent, and rank them with deterministic checks.",
+  "version": "0.4.0",
+  "author": {
+    "name": "andysolomon"
+  },
+  "repository": "https://github.com/andysolomon/arc-prompt-optimizer",
+  "keywords": ["prompt-engineering", "prompt-optimization", "skills"]
+}

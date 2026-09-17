@@ -133,7 +133,7 @@ test("package bin points at the CLI wrapper", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(packageJson.bin["arc-prompt"], "./bin/arc-prompt");
   assert.equal(packageJson.scripts.prepack, "npm run build");
-  assert.deepEqual(packageJson.files, ["bin/arc-prompt", "dist/**"]);
+  assert.deepEqual(packageJson.files, ["bin/arc-prompt", "dist/**", "skills/**", ".claude-plugin/**", "commands/**"]);
   await access(new URL("../bin/arc-prompt", import.meta.url), constants.X_OK);
 });
 
