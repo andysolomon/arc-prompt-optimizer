@@ -17,6 +17,7 @@ export interface CliIo {
 export const MAX_CLI_PROMPT_CHARACTERS = 16_384;
 const PROMPT_READ_CHUNK_BYTES = 4_096;
 export const MAX_CLI_SUITE_JSON_BYTES = 8 * 1024 * 1024;
+export const MAX_CLI_OUTPUTS_JSON_BYTES = 8 * 1024 * 1024;
 
 export async function writeStream(stream: WritableLike, text: string): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
@@ -80,9 +81,8 @@ function suiteTooLargeError(path: string): CliError {
   return new CliError("INPUT_TOO_LARGE", `Suite file '${path}' exceeds ${MAX_CLI_SUITE_JSON_BYTES} bytes.`);
 }
 
-async function readBoundedUtf8File(path: string, displayPath: string, maxBytes: number): Promise<string> {
-  const stream = createReadStream(path, { encoding: "utf8", highWaterMark: PROMPT_READ_CHUNK_BYTES });
-  return await new Promise((resolvePromise, reject) => {
+function readBoundedUtf8Stream(stream: ReadableLike, maxBytes: number, tooLarge: () => CliError): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
     let text = "";
     let bytes = 0;
     let settled = false;
@@ -98,7 +98,7 @@ async function readBoundedUtf8File(path: string, displayPath: string, maxBytes: 
       if (settled) return;
       bytes += Buffer.byteLength(chunk, "utf8");
       if (bytes > maxBytes) {
-        rejectOnce(suiteTooLargeError(displayPath));
+        rejectOnce(tooLarge());
         return;
       }
       text += chunk;
@@ -110,6 +110,11 @@ async function readBoundedUtf8File(path: string, displayPath: string, maxBytes: 
     });
     stream.on("error", rejectOnce);
   });
+}
+
+async function readBoundedUtf8File(path: string, displayPath: string, maxBytes: number): Promise<string> {
+  const stream = createReadStream(path, { encoding: "utf8", highWaterMark: PROMPT_READ_CHUNK_BYTES });
+  return await readBoundedUtf8Stream(stream, maxBytes, () => suiteTooLargeError(displayPath));
 }
 
 export async function loadPrompt(args: ParsedArgs, io: CliIo): Promise<string> {
@@ -154,6 +159,52 @@ export async function loadSuite(args: ParsedArgs, io: CliIo): Promise<Evaluation
   const suite = validateEvaluationSuite(parsed);
   if (suite.cases.length === 0) throw new CliError("INVALID_ARGUMENT", `Suite '${suite.id}' must include at least one case.`);
   return suite;
+}
+
+/** Loads the suite from --suite when present; otherwise returns the fallback suite. */
+export async function loadOptionalSuite(args: ParsedArgs, io: CliIo, fallback: EvaluationSuite): Promise<EvaluationSuite> {
+  if (singleFlag(args, "suite") === undefined) return fallback;
+  return await loadSuite(args, io);
+}
+
+/** Reads harness-produced outputs JSON from exactly one source: --outputs <file> or stdin. */
+export async function loadOutputsJson(args: ParsedArgs, io: CliIo): Promise<unknown> {
+  const path = singleFlag(args, "outputs");
+  let stdinText = "";
+  if (io.stdin.isTTY !== true) {
+    io.stdin.setEncoding("utf8");
+    stdinText = await readBoundedUtf8Stream(
+      io.stdin,
+      MAX_CLI_OUTPUTS_JSON_BYTES,
+      () => new CliError("INPUT_TOO_LARGE", `Outputs input on stdin exceeds ${MAX_CLI_OUTPUTS_JSON_BYTES} bytes.`),
+    );
+  }
+  const hasStdin = stdinText.trim() !== "";
+  if (path !== undefined && hasStdin) {
+    throw new CliError("AMBIGUOUS_INPUT", "Provide outputs JSON from exactly one source: --outputs or stdin.");
+  }
+  let text: string;
+  let label: string;
+  if (path !== undefined) {
+    const stream = createReadStream(resolve(io.cwd, path), { encoding: "utf8", highWaterMark: PROMPT_READ_CHUNK_BYTES });
+    text = await readBoundedUtf8Stream(
+      stream,
+      MAX_CLI_OUTPUTS_JSON_BYTES,
+      () => new CliError("INPUT_TOO_LARGE", `Outputs file '${path}' exceeds ${MAX_CLI_OUTPUTS_JSON_BYTES} bytes.`),
+    );
+    label = `Outputs file '${path}'`;
+  } else if (hasStdin) {
+    text = stdinText;
+    label = "Outputs input on stdin";
+  } else {
+    throw new CliError("MISSING_INPUT", "Provide outputs JSON from --outputs <file.json> or stdin.");
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new CliError("INVALID_JSON", `${label} is not valid JSON.`);
+    throw error;
+  }
 }
 
 export function validateOutputFlag(args: ParsedArgs): void {

@@ -54,6 +54,12 @@ export {
 } from "./optimize.js";
 export type { GenerateCandidatesRequest, GeneratedCandidates, OptimizeRequest } from "./optimize.js";
 export {
+  PREVIEW_CANDIDATE_COUNT,
+  PREVIEW_SUITE,
+  baselineCandidate,
+  buildPreviewCandidates,
+} from "./preview.js";
+export {
   DEFAULT_RANKING_OBJECTIVE,
   combineQuality,
   rankCandidates,

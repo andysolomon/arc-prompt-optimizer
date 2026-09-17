@@ -6,6 +6,7 @@ import type {
   RankedCandidate,
   SuiteEvaluation,
 } from "../core/index.js";
+import type { HarnessCandidateView, HarnessScoreResult } from "./harness.js";
 import { stringifyCliJsonLine } from "./json.js";
 
 function valueOf(measurement: { readonly status: string; readonly value?: number; readonly reason?: string }): string {
@@ -169,4 +170,42 @@ export function generatedSpecsSummary(generated: GeneratedCandidates): object {
     candidateIds: generated.candidates.map((candidate) => candidate.id),
     provenance: generated.provenance,
   };
+}
+
+export function formatCandidatesJson(candidates: readonly HarnessCandidateView[]): string {
+  return formatJson({
+    candidates: candidates.map((candidate) => ({ id: candidate.id, pattern: candidate.pattern, prompt: candidate.prompt })),
+  });
+}
+
+export function formatCandidatesText(candidates: readonly HarnessCandidateView[]): string {
+  const sections = candidates.map((candidate) =>
+    [`== ${candidate.id} (${candidate.label}, pattern: ${candidate.pattern})`, candidate.prompt].join("\n"),
+  );
+  return `${sections.join("\n\n")}\n`;
+}
+
+export function formatScoreJson(result: HarnessScoreResult): string {
+  return formatJson({
+    evaluations: result.evaluations,
+    objective: result.objective,
+    ranking: result.ranking,
+    suiteId: result.suiteId,
+  });
+}
+
+export function formatScoreText(result: HarnessScoreResult): string {
+  const sections = [
+    `Suite: ${result.suiteId}`,
+    "",
+    "Ranking",
+    table(["Rank", "Candidate", "Quality", "TieBreaker"], rankRows(result.ranking)),
+    "",
+    "Heuristic metrics",
+    table(["Candidate", "Passed", "Score"], candidateRows(result.evaluations)),
+    "",
+    "Operational metrics",
+    table(["Candidate", "LatencyMs", "TotalTokens", "CostUsd"], operationalRows(result.evaluations)),
+  ];
+  return `${sections.join("\n")}\n`;
 }

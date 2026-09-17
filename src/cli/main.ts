@@ -2,8 +2,10 @@ import process from "node:process";
 import {
   DEFAULT_RANKING_OBJECTIVE,
   MAX_COMPLETION_MODEL_CHARACTERS,
+  MAX_EVALUATION_CANDIDATES,
   MAX_COMPLETION_OUTPUT_CHARACTERS,
   MAX_COMPLETION_TIMEOUT_MS,
+  PREVIEW_SUITE,
   PROMPT_PATTERNS,
   defaultPatternCatalog,
   fingerprint,
@@ -17,14 +19,30 @@ import { hasFlag, integerFlag, parseArgs, singleFlag, type ParsedArgs } from "./
 import { listDefaultPiModels, selectAdapter } from "./adapters.js";
 import { CliError } from "./errors.js";
 import { evaluateCandidatesBounded } from "./evaluate.js";
-import { MAX_CLI_PROMPT_CHARACTERS, type CliIo, loadPrompt, loadSuite, validateOutputFlag, writeJsonOutput, writeStream } from "./io.js";
+import { harnessCandidates, scoreHarnessOutputs } from "./harness.js";
 import {
+  MAX_CLI_OUTPUTS_JSON_BYTES,
+  MAX_CLI_PROMPT_CHARACTERS,
+  type CliIo,
+  loadOptionalSuite,
+  loadOutputsJson,
+  loadPrompt,
+  loadSuite,
+  validateOutputFlag,
+  writeJsonOutput,
+  writeStream,
+} from "./io.js";
+import {
+  formatCandidatesJson,
+  formatCandidatesText,
   formatEvaluationText,
   formatJson,
   formatModelsText,
   formatOptimizationText,
   formatPatternsJson,
   formatPatternsText,
+  formatScoreJson,
+  formatScoreText,
   fullEvaluationForOutput,
   fullOptimizationForOutput,
   redactOptimization,
@@ -47,6 +65,8 @@ Commands:
   evaluate   Evaluate one prompt against a suite.
   patterns   List the offline prompt pattern catalog.
   models     List available models.
+  candidates Print the baseline and pattern prompt candidates (no model calls).
+  score      Score harness-produced candidate outputs deterministically (no model calls).
 
 Common options:
   --json                    Emit canonical JSON.
@@ -121,6 +141,39 @@ List available models. Use --simulate for the credential-free simulated catalog.
 Options:
   --json                    Emit canonical JSON.
   --simulate                Use the credential-free simulated catalog.
+  -h, --help                Show help.
+`,
+  candidates: `Usage: arc-prompt candidates [--prompt <text>|--prompt-file <file>|stdin] [options]
+
+Print the baseline prompt plus critique, decomposition, and structured reasoning variants.
+No model calls, credentials, or network access. Candidate ids are stable for a given prompt.
+
+Options:
+  --prompt <text>           Prompt input as an argument.
+  --prompt-file <file>      Prompt input from a file.
+  --json                    Emit canonical JSON: {"candidates":[{"id","pattern","prompt"}]}.
+  Prompt input limit: ${MAX_CLI_PROMPT_CHARACTERS} UTF-16 characters.
+  -h, --help                Show help.
+`,
+  score: `Usage: arc-prompt score [--suite <file.json>] [--outputs <file.json>|stdin] [options]
+
+Score candidate outputs produced by any agent harness with deterministic checks, then rank them.
+No model calls, credentials, network access, or semantic judge.
+
+Outputs JSON (unknown keys are rejected):
+  {"candidates":[{"id":"<candidateId>","prompt":"<optional text>",
+    "outputs":{"<caseId>":"<output text>"},
+    "measurements":{"<caseId>":{"latencyMs":0,"inputTokens":0,"outputTokens":0,"costUsd":0}}}]}
+  Every suite case needs an output for every candidate. Measurements are optional; missing ones are
+  reported as unknown and only break exact quality ties.
+  Without --suite, the preview suite '${PREVIEW_SUITE.id}' is used; its single case id is
+  '${PREVIEW_SUITE.cases[0]!.id}' (passes when the output is non-empty).
+
+Options:
+  --suite <file.json>       Evaluation suite JSON (default: preview suite).
+  --outputs <file.json>     Outputs JSON from a file (otherwise read from stdin).
+  --json                    Emit canonical JSON with ranking and per-case checks.
+  Limits: ${MAX_EVALUATION_CANDIDATES} candidates, ${MAX_COMPLETION_OUTPUT_CHARACTERS} characters per output, ${MAX_CLI_OUTPUTS_JSON_BYTES} bytes of outputs JSON.
   -h, --help                Show help.
 `,
 };
@@ -234,6 +287,21 @@ async function commandModels(args: ParsedArgs, io: CliIo): Promise<number> {
   return 0;
 }
 
+async function commandCandidates(args: ParsedArgs, io: CliIo): Promise<number> {
+  const prompt = await loadPrompt(args, io);
+  const candidates = harnessCandidates(prompt);
+  await writeStream(io.stdout, hasFlag(args, "json") ? formatCandidatesJson(candidates) : formatCandidatesText(candidates));
+  return 0;
+}
+
+async function commandScore(args: ParsedArgs, io: CliIo): Promise<number> {
+  const suite = await loadOptionalSuite(args, io, PREVIEW_SUITE);
+  const outputs = await loadOutputsJson(args, io);
+  const result = scoreHarnessOutputs(suite, outputs);
+  await writeStream(io.stdout, hasFlag(args, "json") ? formatScoreJson(result) : formatScoreText(result));
+  return 0;
+}
+
 async function commandEvaluate(args: ParsedArgs, io: CliIo): Promise<number> {
   const options = cliOptions(args);
   const prompt = await loadPrompt(args, io);
@@ -317,6 +385,10 @@ export async function runCli(options: RunCliOptions = {}): Promise<number> {
         return await commandEvaluate(args, io);
       case "optimize":
         return await commandOptimize(args, io);
+      case "candidates":
+        return await commandCandidates(args, io);
+      case "score":
+        return await commandScore(args, io);
     }
   } catch (error) {
     if (error instanceof CliError) {

@@ -95,12 +95,14 @@ const exactSuite = {
 
 test("help paths write documented help to stdout without credentials", async () => {
   const helpCases = [
-    { args: ["--help"], includes: ["optimize", "evaluate", "patterns", "models", "--timeout <ms>", "--timeout-ms <ms>"] },
-    { args: ["-h"], includes: ["optimize", "evaluate", "patterns", "models", "--timeout <ms>", "--timeout-ms <ms>"] },
+    { args: ["--help"], includes: ["optimize", "evaluate", "patterns", "models", "candidates", "score", "--timeout <ms>", "--timeout-ms <ms>"] },
+    { args: ["-h"], includes: ["optimize", "evaluate", "patterns", "models", "candidates", "score", "--timeout <ms>", "--timeout-ms <ms>"] },
     { args: ["optimize", "--help"], includes: ["arc-prompt optimize", "--suite", "--prompt", "--timeout <ms>", "--timeout-ms <ms>"] },
     { args: ["evaluate", "--help"], includes: ["arc-prompt evaluate", "--suite", "--prompt", "--timeout <ms>", "--timeout-ms <ms>"] },
     { args: ["patterns", "--help"], includes: ["arc-prompt patterns", "--json"] },
     { args: ["models", "--help"], includes: ["arc-prompt models", "--json", "--simulate"], excludes: ["--default-model"] },
+    { args: ["candidates", "--help"], includes: ["arc-prompt candidates", "--prompt", "--json"], excludes: ["--model", "--simulate"] },
+    { args: ["score", "--help"], includes: ["arc-prompt score", "--suite", "--outputs", "--json"], excludes: ["--model", "--simulate"] },
   ];
 
   for (const { args, includes, excludes = [] } of helpCases) {
