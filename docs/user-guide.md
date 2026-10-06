@@ -190,6 +190,18 @@ Every prompt is length-checked before the first completion runs.
 - **Harness-produced scores are deterministic checks on agent-written outputs.** `arc-prompt score` and the skill tool never call a model. See [Harness-agnostic workflow](#harness-agnostic-workflow) for trade-offs.
 - **The `/prompt-optimize` preview ranking is mostly operational.** Its built-in suite has one case whose only criterion is `minCharacters: 1` (non-empty output). Any non-empty reply scores 1, so ranking falls through to tokens, latency, and cost. Treat the review step as a side-by-side reading aid, not a quality verdict.
 
+## Model rewrite (library)
+
+`rewritePrompt(adapter, prompt, options)` asks a model to rewrite a draft prompt before it is compared, which is the step the three pattern templates cannot do on their own: they only wrap your words, while the rewrite adds a specific role, an explicit output format, positive, negative, and conditional constraints, and examples where the format matters.
+
+- It makes exactly one completion through the `CompletionAdapter` you pass, with the same `model`, `timeoutMs`, and `signal` options as an evaluation. It is explicit generation: nothing calls it automatically.
+- The reply must contain `<analysis>`, `<rewritten_prompt>`, and `<changes>` sections. The last complete `<rewritten_prompt>` section wins, so reasoning that mentions the tags is ignored. A missing or empty section is reported as `invalid`, never guessed.
+- On success it returns a `rewrite-<fingerprint>` candidate with origin `explicit_generation` and the baseline as its parent, ready to evaluate next to `buildPreviewCandidates`, plus the weakness and change notes and the completion's measurements.
+- Adapter errors and timeouts return `failed`; cancellation is rethrown so the caller's run stops.
+- The model is told to keep the draft's intent and facts, not to invent data, and to leave one delimited slot for any material the draft refers to but does not include.
+
+The CLI, the Pi extension, and the `prompt-optimize` skill do not call it yet. The web app in `web/` does. The protocol is adapted from the prompt optimizer in [AI Engineering from Scratch](https://github.com/rohitg00/ai-engineering-from-scratch) under the MIT License; see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+
 ## Model selection
 
 **CLI**

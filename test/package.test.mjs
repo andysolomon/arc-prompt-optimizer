@@ -13,7 +13,7 @@ const run = promisify(execFile);
 const rootPath = fileURLToPath(new URL("../", import.meta.url));
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 
-const ALLOWED_TOP_LEVEL = new Set(["bin/arc-prompt", "package.json", "README.md", "CHANGELOG.md", "LICENSE"]);
+const ALLOWED_TOP_LEVEL = new Set(["bin/arc-prompt", "package.json", "README.md", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md"]);
 const FORBIDDEN = /^(?:src|test|docs|fixtures|scripts|node_modules|\.github|\.agents|\.claude)\/|(?:^|\/)\.env|\.tgz$/u;
 
 async function withTempDir(prefix, fn) {
@@ -53,6 +53,7 @@ test("the packed tarball ships only the CLI, built dist, skill, plugin manifests
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",
     "commands/prompt-optimize.md",
+    "THIRD_PARTY_NOTICES.md",
   ]) {
     assert.ok(files.includes(required), `${required} is packed`);
   }

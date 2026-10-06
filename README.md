@@ -40,6 +40,10 @@ A Pi install (see [Pi package](#pi-package)) provides both the native `/prompt-o
 
 The harness workflow has trade-offs. The same agent writes the variants and produces their outputs, scores come from deterministic checks only, the default preview suite only checks that outputs are non-empty, and latency, tokens, and cost stay unknown unless the harness reports them. See [docs/user-guide.md](docs/user-guide.md#harness-agnostic-workflow).
 
+### Web app
+
+The [`web/`](web/README.md) directory holds a Next.js frontend for Vercel. Paste a prompt, pick a model from Anthropic, OpenAI, Google, MiniMax, or OpenCode Go, confirm, and the model first rewrites your prompt with the core's `rewritePrompt`, then the rewrite and the four preview candidates run through the core evaluation and ranking, optionally judged by TypeSafe's Jev. See [web/README.md](web/README.md) for setup, environment variables, and the deploy button.
+
 ### Standalone CLI
 
 ```sh

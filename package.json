@@ -41,7 +41,8 @@
     "dist/**",
     "skills/**",
     ".claude-plugin/**",
-    "commands/**"
+    "commands/**",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "pi": {
     "extensions": [
