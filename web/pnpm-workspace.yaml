@@ -2,3 +2,5 @@ allowBuilds:
   esbuild: true
   sharp: true
   unrs-resolver: true
+# Mirror the default supply-chain policy Vercel applies so a failing lockfile is caught locally.
+minimumReleaseAge: 1440
