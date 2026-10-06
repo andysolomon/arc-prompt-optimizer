@@ -1,14 +1,51 @@
-/** Fixed step list shown while a run is in flight; the server emits one event per step in this order. */
-export function stepLabels(judge: boolean): readonly string[] {
-  return [
-    "Render 4 candidates",
-    "Run baseline",
-    "Run critique",
-    "Run decomposition",
-    "Run structured reasoning",
-    ...(judge ? ["Score outputs with Jev"] : []),
-    "Rank candidates",
-  ];
+import { candidateCount, type StepEvent } from "@/lib/types";
+
+export interface StepItem {
+  readonly key: string;
+  readonly label: string;
+}
+
+export interface StepState {
+  readonly steps: readonly StepItem[];
+  readonly done: readonly string[];
+}
+
+const PLANNED_RUN = "planned-run:";
+
+/**
+ * Steps shown before the server reports anything. Run steps are placeholders until the `render` event names
+ * the actual candidates, so a failed rewrite (four candidates instead of five) never leaves the list misaligned.
+ */
+export function planSteps(judge: boolean, rewrite: boolean): StepState {
+  const runs = ["baseline", ...(rewrite ? ["rewrite"] : []), "critique", "decomposition", "structured reasoning"];
+  return {
+    steps: [
+      ...(rewrite ? [{ key: "rewrite", label: "Rewrite the prompt" }] : []),
+      { key: "render", label: `Render ${candidateCount(rewrite)} candidates` },
+      ...runs.map((name) => ({ key: `${PLANNED_RUN}${name}`, label: `Run ${name}` })),
+      ...(judge ? [{ key: "judge", label: "Score outputs with Jev" }] : []),
+      { key: "rank", label: "Rank candidates" },
+    ],
+    done: [],
+  };
+}
+
+/** Marks a server step done; the `render` event also swaps the planned run steps for the rendered candidates. */
+export function advanceSteps(state: StepState, event: StepEvent): StepState {
+  let steps = state.steps;
+  if (event.step === "render" && event.candidateIds !== undefined) {
+    const ids = event.candidateIds;
+    const labels = event.candidateLabels ?? ids;
+    const runs = ids.map((id, index) => ({ key: `run:${id}`, label: `Run ${(labels[index] ?? id).toLowerCase()}` }));
+    const firstPlanned = steps.findIndex((step) => step.key.startsWith(PLANNED_RUN));
+    const kept = steps
+      .filter((step) => !step.key.startsWith(PLANNED_RUN))
+      .map((step) => (step.key === "render" ? { key: "render", label: `Render ${ids.length} candidates` } : step));
+    const insertAt = firstPlanned === -1 ? kept.length : firstPlanned;
+    steps = [...kept.slice(0, insertAt), ...runs, ...kept.slice(insertAt)];
+  }
+  const done = state.done.includes(event.step) ? state.done : [...state.done, event.step];
+  return { steps, done };
 }
 
 export function progressPercent(doneCount: number, total: number): number {

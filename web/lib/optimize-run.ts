@@ -4,12 +4,14 @@ import {
   PREVIEW_SUITE,
   aggregateCases,
   buildPreviewCandidates,
-  evaluateSuite,
+  evaluateCandidate,
   rankCandidates,
+  rewritePrompt,
 } from "@/lib/arc-core/core/index.js";
 import type {
   CandidateEvaluation,
   CaseEvaluation,
+  EvaluateOptions,
   CompletionAdapter,
   CompletionRequest,
   CompletionResult,
@@ -17,26 +19,72 @@ import type {
 } from "@/lib/arc-core/core/index.js";
 import { AiSdkCompletionAdapter, MockCompletionAdapter } from "@/lib/adapter";
 import { mockProvidersEnabled, type ServerEnv } from "@/lib/env";
+import { candidateLabel } from "@/lib/format";
+import { getModel } from "@/lib/models";
 import { judgeWithJev, type JevEntry } from "@/lib/jev";
 import {
   JUDGE_RANKING_OBJECTIVE,
   type JudgeReport,
   type OptimizeRequest,
+  type RewriteReport,
   type OptimizeResult,
   type StepEvent,
 } from "@/lib/types";
 
 export const COMPLETION_TIMEOUT_MS = 60_000;
+/**
+ * Reasoning-heavy gateways (MiniMax, OpenCode Go) regularly need more than a minute for one long answer, and the
+ * rewrite reply (analysis, full prompt, change list) is the longest completion in a run.
+ */
+export const SLOW_COMPLETION_TIMEOUT_MS = 120_000;
+export const REWRITE_TIMEOUT_MS = 120_000;
+
+/** Per-completion timeout. Worst case per run: rewrite + one parallel round of candidates + judge ≤ 300 s. */
+export function completionTimeoutMs(model: OptimizeRequest["model"]): number {
+  const provider = getModel(model).provider;
+  return provider === "minimax" || provider === "opencode-go" ? SLOW_COMPLETION_TIMEOUT_MS : COMPLETION_TIMEOUT_MS;
+}
 
 /**
- * Records each candidate's output in run order. `evaluateSuite` evaluates candidates sequentially, so the
- * n-th completion belongs to the n-th candidate; the prompt text is checked as a guard.
+ * Evaluates every candidate concurrently with the core's evaluateCandidate (the same per-candidate path
+ * evaluateSuite takes sequentially), so a run waits for the slowest completion rather than the sum of all of
+ * them. The first failure aborts the remaining completions and names the candidate that failed.
+ */
+async function evaluateConcurrently(
+  adapter: CompletionAdapter,
+  candidates: readonly PromptCandidate[],
+  options: Required<Pick<EvaluateOptions, "model" | "timeoutMs" | "signal">>,
+): Promise<{ candidates: readonly CandidateEvaluation[]; completionsUsed: number }> {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (options.signal.aborted) controller.abort();
+  options.signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    const evaluations = await Promise.all(
+      candidates.map((candidate) =>
+        evaluateCandidate(adapter, candidate, PREVIEW_SUITE, { ...options, signal: controller.signal }).catch((error: unknown) => {
+          const first = !controller.signal.aborted;
+          controller.abort();
+          if (!first || options.signal.aborted) throw error;
+          const label = candidateLabel(candidate.metadata?.label, candidate.prompt.pattern).toLowerCase();
+          throw new Error(`The ${label} candidate failed: ${error instanceof Error ? error.message : String(error)}`);
+        }),
+      ),
+    );
+    return { candidates: evaluations, completionsUsed: candidates.length * PREVIEW_SUITE.cases.length };
+  } finally {
+    options.signal.removeEventListener("abort", onAbort);
+  }
+}
+
+/**
+ * Records each candidate's output. Completions run concurrently, so the candidate is identified by its prompt
+ * text (the preview suite has no case input, so the completion prompt is exactly the candidate text).
  */
 class RecordingAdapter implements CompletionAdapter {
   readonly #inner: CompletionAdapter;
   readonly #candidates: readonly PromptCandidate[];
   readonly #onComplete: (candidate: PromptCandidate, output: string) => void;
-  #index = 0;
 
   constructor(
     inner: CompletionAdapter,
@@ -56,9 +104,7 @@ class RecordingAdapter implements CompletionAdapter {
       ...(request.maxOutputCharacters === undefined ? {} : { maxOutputCharacters: request.maxOutputCharacters }),
     };
     const result = await this.#inner.complete(liveRequest, signal);
-    const byText = this.#candidates.find((candidate) => candidate.prompt.text === request.prompt);
-    const candidate = byText ?? this.#candidates[this.#index];
-    this.#index += 1;
+    const candidate = this.#candidates.find((entry) => entry.prompt.text === request.prompt);
     if (candidate !== undefined) this.#onComplete(candidate, result.text);
     return result;
   }
@@ -114,22 +160,54 @@ function mockJudge(entries: readonly JevEntry[]): JudgeReport {
 }
 
 /**
- * render → run ×4 → (judge) → rank. Emits one step event as each step completes. Prompts and outputs are
- * held in memory for the duration of the request only and are never logged or persisted.
+ * (rewrite) → render → run ×4–5 concurrently → (judge) → rank. Emits one step event as each step completes. Prompts and
+ * outputs are held in memory for the duration of the request only and are never logged or persisted.
  */
 export async function runOptimization(request: OptimizeRequest, options: RunOptions): Promise<OptimizeResult> {
-  const candidates = buildPreviewCandidates(request.prompt);
-  options.emit({ step: "render", candidateIds: candidates.map((candidate) => candidate.id) });
+  const modelAdapter = selectAdapter(request, options);
+  const preview = buildPreviewCandidates(request.prompt);
+
+  let rewrite: RewriteReport = { status: "not_requested" };
+  let rewriteCompletions = 0;
+  let candidates: readonly PromptCandidate[] = preview;
+  if (request.rewrite) {
+    // Cancellation propagates from rewritePrompt and stops the run; other failures leave the four preview candidates.
+    const outcome = await rewritePrompt(modelAdapter, request.prompt, {
+      model: request.model,
+      timeoutMs: REWRITE_TIMEOUT_MS,
+      signal: options.signal,
+    });
+    rewriteCompletions = 1;
+    if (outcome.status === "rewritten") {
+      candidates = [preview[0]!, outcome.candidate, ...preview.slice(1)];
+      rewrite = {
+        status: "rewritten",
+        candidateId: outcome.candidate.id,
+        analysis: [...outcome.analysis],
+        changes: [...outcome.changes],
+        measurements: outcome.measurements,
+      };
+    } else {
+      rewrite = { status: "failed", reason: outcome.reason };
+    }
+    options.emit({ step: "rewrite", status: rewrite.status === "rewritten" ? "rewritten" : "failed" });
+  }
+
+  options.emit({
+    step: "render",
+    candidateIds: candidates.map((candidate) => candidate.id),
+    candidateLabels: candidates.map((candidate) => candidateLabel(candidate.metadata?.label, candidate.prompt.pattern)),
+  });
 
   const outputs = new Map<string, string>();
-  const adapter = new RecordingAdapter(selectAdapter(request, options), candidates, (candidate, output) => {
+  const adapter = new RecordingAdapter(modelAdapter, candidates, (candidate, output) => {
     outputs.set(candidate.id, output);
     options.emit({ step: `run:${candidate.id}` });
   });
 
-  const evaluation = await evaluateSuite(adapter, candidates, PREVIEW_SUITE, {
+  const evaluation = await evaluateConcurrently(adapter, candidates, {
     model: request.model,
-    timeoutMs: COMPLETION_TIMEOUT_MS,
+    timeoutMs: completionTimeoutMs(request.model),
     signal: options.signal,
   });
 
@@ -165,7 +243,8 @@ export async function runOptimization(request: OptimizeRequest, options: RunOpti
     evaluations,
     ranking,
     judge,
-    completionsUsed: evaluation.completionsUsed,
+    rewrite,
+    completionsUsed: evaluation.completionsUsed + rewriteCompletions,
     model: request.model,
   };
 }

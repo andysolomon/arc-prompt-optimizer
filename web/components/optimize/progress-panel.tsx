@@ -3,21 +3,28 @@
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { progressPercent } from "@/lib/client/steps";
+import { progressPercent, type StepState } from "@/lib/client/steps";
 import { cn } from "@/lib/utils";
 
 export function ProgressPanel({
   modelLabel,
-  steps,
-  doneCount,
+  state,
   onCancel,
 }: {
   modelLabel: string;
-  steps: readonly string[];
-  doneCount: number;
+  state: StepState;
   onCancel: () => void;
 }) {
-  const percent = progressPercent(doneCount, steps.length);
+  const doneCount = state.steps.filter((step) => state.done.includes(step.key)).length;
+  // Candidate runs execute concurrently once rendering is done, so every unfinished run step is in progress.
+  const renderDone = state.done.includes("render");
+  const pendingRuns = state.steps.filter((step) => step.key.startsWith("run:") && !state.done.includes(step.key));
+  const activeKeys = new Set(
+    renderDone && pendingRuns.length > 0
+      ? pendingRuns.map((step) => step.key)
+      : [state.steps.find((step) => !state.done.includes(step.key))?.key].filter((key): key is string => key !== undefined),
+  );
+  const percent = progressPercent(doneCount, state.steps.length);
   return (
     <section aria-label="Progress" aria-live="polite" className="flex flex-col gap-3.5 rounded-[10px] border border-border bg-card p-5">
       <div className="flex items-center justify-between gap-3">
@@ -28,11 +35,11 @@ export function ProgressPanel({
       </div>
       <Progress value={percent} aria-label="Run progress" className="h-1 bg-muted" />
       <ol className="m-0 flex list-none flex-col gap-2 p-0 text-sm">
-        {steps.map((label, index) => {
-          const done = index < doneCount;
-          const active = index === doneCount;
+        {state.steps.map((step) => {
+          const done = state.done.includes(step.key);
+          const active = activeKeys.has(step.key);
           return (
-            <li key={label} className={cn("flex items-center gap-2.5", done || active ? "text-foreground" : "text-muted-foreground")}>
+            <li key={step.key} className={cn("flex items-center gap-2.5", done || active ? "text-foreground" : "text-muted-foreground")}>
               <span className="inline-flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
                 {done ? (
                   <Check className="size-3.5" strokeWidth={2.5} />
@@ -43,7 +50,7 @@ export function ProgressPanel({
                 )}
               </span>
               <span>
-                {label}
+                {step.label}
                 <span className="sr-only">{done ? " (done)" : active ? " (in progress)" : " (pending)"}</span>
               </span>
             </li>

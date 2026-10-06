@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 export const CAVEAT_JUDGED =
   "Deterministic checks use the preview suite, which only verifies that each output is non-empty, so every candidate passes 1/1. The Jev score is a Score question over four levels, normalized and averaged with the deterministic score. Confidence reflects how spread the probability is across levels, not whether the answer is correct. Supply an evaluation suite for a meaningful comparison.";
 export const CAVEAT_DETERMINISTIC =
-  "Scores come from deterministic checks only. Without an evaluation suite, the preview suite only checks that outputs are non-empty, so ties are expected and are broken by total tokens, then latency. Enable the Jev judge or supply a suite for a meaningful comparison.";
+  "Scores come from deterministic checks only. Without an evaluation suite, the preview suite only checks that outputs are non-empty, so ties are expected and are broken by total tokens, then latency. When the rewrite ties for first, it is shown first. Enable the Jev judge or supply a suite for a meaningful comparison.";
 
 export interface RowView {
   readonly ranked: RankedCandidate;
@@ -72,10 +72,13 @@ export function ResultPanel({
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [showReasons, setShowReasons] = useState(false);
   const rows = buildRows(result, edited);
   const best = rows.find((row) => row.id === selectedId) ?? rows[0];
   if (best === undefined) return null;
   const judgeUsed = result.judge.status === "judged";
+  const rewriteReport = result.rewrite.status === "rewritten" && result.rewrite.candidateId === best.id ? result.rewrite : undefined;
+  const hasReasons = rewriteReport !== undefined && (rewriteReport.analysis.length > 0 || rewriteReport.changes.length > 0);
 
   const copy = async () => {
     try {
@@ -181,6 +184,44 @@ export function ResultPanel({
             +{best.added} −{best.removed} lines vs. original
           </span>
         </div>
+
+        {hasReasons && rewriteReport ? (
+          <Collapsible open={showReasons} onOpenChange={setShowReasons} className="border-t border-border">
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-b-[10px] px-4 py-2.5 text-[13px] font-medium transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                <span>Why it was rewritten ({rewriteReport.changes.length} changes)</span>
+                <ChevronDown aria-hidden="true" className={cn("size-4 transition-transform", showReasons && "rotate-180")} />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="flex flex-col gap-3 px-4 pb-4 text-[13px] leading-relaxed">
+                {rewriteReport.analysis.length > 0 ? (
+                  <div>
+                    <h3 className="m-0 mb-1 text-xs font-medium text-muted-foreground">Weaknesses in the original</h3>
+                    <ul className="m-0 list-disc space-y-0.5 pl-5">
+                      {rewriteReport.analysis.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {rewriteReport.changes.length > 0 ? (
+                  <div>
+                    <h3 className="m-0 mb-1 text-xs font-medium text-muted-foreground">Changes</h3>
+                    <ol className="m-0 list-decimal space-y-0.5 pl-5">
+                      {rewriteReport.changes.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : null}
       </div>
 
       <Collapsible open={expanded} onOpenChange={setExpanded} className="rounded-[10px] border border-border bg-card">
@@ -257,6 +298,11 @@ export function ResultPanel({
               );
             })}
             <p className="m-0 px-4 py-3 text-xs leading-relaxed text-muted-foreground text-pretty">{judgeUsed ? CAVEAT_JUDGED : CAVEAT_DETERMINISTIC}</p>
+            {result.rewrite.status === "failed" ? (
+              <p role="status" className="m-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+                The rewrite failed, so it is not in this ranking. Reason: {result.rewrite.reason}
+              </p>
+            ) : null}
             {result.judge.status === "failed" ? (
               <p role="status" className="m-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
                 Jev judging failed, so this ranking uses deterministic checks only. Reason: {result.judge.reason}

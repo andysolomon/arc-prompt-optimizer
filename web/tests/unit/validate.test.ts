@@ -7,7 +7,17 @@ const all = [...MODEL_IDS];
 describe("validateOptimizeBody", () => {
   it("accepts a well-formed request and returns the parsed value unchanged", () => {
     const outcome = validateOptimizeBody({ prompt: "  Summarize this.  ", model: "openai/gpt-5-mini", judge: false }, all);
-    expect(outcome).toEqual({ ok: true, value: { prompt: "  Summarize this.  ", model: "openai/gpt-5-mini", judge: false } });
+    expect(outcome).toEqual({ ok: true, value: { prompt: "  Summarize this.  ", model: "openai/gpt-5-mini", judge: false, rewrite: true } });
+  });
+
+  it("defaults rewrite to true and accepts an explicit opt-out", () => {
+    const off = validateOptimizeBody({ prompt: "p", model: all[0], judge: false, rewrite: false }, all);
+    expect(off).toMatchObject({ ok: true, value: { rewrite: false } });
+    expect(validateOptimizeBody({ prompt: "p", model: all[0], judge: false, rewrite: "yes" }, all)).toMatchObject({
+      ok: false,
+      status: 400,
+      message: "rewrite must be a boolean.",
+    });
   });
 
   it("rejects an empty or whitespace-only prompt with 400", () => {

@@ -42,7 +42,7 @@ The harness workflow has trade-offs. The same agent writes the variants and prod
 
 ### Web app
 
-The [`web/`](web/README.md) directory holds a Next.js frontend for Vercel. Paste a prompt, pick a model (Claude Sonnet 4.5, Claude Haiku 4.5, GPT-5 mini, or Gemini 2.5 Flash), confirm, and it runs the same four preview candidates through the core evaluation and ranking, optionally judged by TypeSafe's Jev. See [web/README.md](web/README.md) for setup, environment variables, and the deploy button.
+The [`web/`](web/README.md) directory holds a Next.js frontend for Vercel. Paste a prompt, pick a model from Anthropic, OpenAI, Google, MiniMax, or OpenCode Go, confirm, and the model first rewrites your prompt with the core's `rewritePrompt`, then the rewrite and the four preview candidates run through the core evaluation and ranking, optionally judged by TypeSafe's Jev. See [web/README.md](web/README.md) for setup, environment variables, and the deploy button.
 
 ### Standalone CLI
 

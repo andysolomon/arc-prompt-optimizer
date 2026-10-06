@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { AiSdkCompletionAdapter, languageModelFor, outputCharacterLimitToMaxTokens, toCompletionResult } from "@/lib/adapter";
+import {
+  AiSdkCompletionAdapter,
+  REASONING_MAX_OUTPUT_TOKENS,
+  languageModelFor,
+  outputCharacterLimitToMaxTokens,
+  toCompletionResult,
+} from "@/lib/adapter";
 import type { ServerEnv } from "@/lib/env";
 import { MODELS, OPENAI_COMPATIBLE_BASE_URLS, availableModels, getModel } from "@/lib/models";
 import { MODEL_IDS } from "@/lib/types";
@@ -122,9 +128,26 @@ describe("completion result mapping", () => {
     expect(outputCharacterLimitToMaxTokens(16_384)).toBe(4096);
     expect(outputCharacterLimitToMaxTokens(1)).toBe(1);
   });
+
+  it("leaves thinking models room to reason before they answer", () => {
+    expect(outputCharacterLimitToMaxTokens(16_384, true)).toBe(REASONING_MAX_OUTPUT_TOKENS);
+    expect(outputCharacterLimitToMaxTokens(1, true)).toBe(REASONING_MAX_OUTPUT_TOKENS);
+  });
 });
 
 describe("AiSdkCompletionAdapter", () => {
+  it("uses the reasoning token cap for MiniMax and OpenCode Go models", async () => {
+    for (const id of ["minimax/MiniMax-M3", "opencode-go/glm-5.3"] as const) {
+      let cap: number | undefined;
+      const adapter = new AiSdkCompletionAdapter(id, fullEnv, async (args) => {
+        cap = args.maxOutputTokens;
+        return { text: "out", finishReason: "stop", usage: { inputTokens: 1, outputTokens: 1 } };
+      });
+      await adapter.complete({ prompt: "hi" });
+      expect(cap).toBe(REASONING_MAX_OUTPUT_TOKENS);
+    }
+  });
+
   it("passes the prompt, token cap, and abort signal to generateText and maps the result", async () => {
     const calls: unknown[] = [];
     const adapter = new AiSdkCompletionAdapter("anthropic/claude-sonnet-4-5", fullEnv, async (args) => {

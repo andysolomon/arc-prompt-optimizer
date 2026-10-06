@@ -9,6 +9,11 @@ export interface ModelDefinition extends ModelInfo {
   readonly envVar: ProviderEnvVar;
 }
 
+/** Gateways whose models always think before answering; their hidden reasoning counts against the output cap. */
+export function isReasoningProvider(provider: Provider): provider is "minimax" | "opencode-go" {
+  return provider === "minimax" || provider === "opencode-go";
+}
+
 export type ProviderEnvVar =
   | "ANTHROPIC_API_KEY"
   | "OPENAI_API_KEY"

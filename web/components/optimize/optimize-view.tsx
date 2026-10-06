@@ -7,11 +7,14 @@ import { ProgressPanel } from "@/components/optimize/progress-panel";
 import { PromptForm } from "@/components/optimize/prompt-form";
 import { ResultPanel } from "@/components/optimize/result-panel";
 import { streamOptimize } from "@/lib/client/sse";
-import { stepLabels } from "@/lib/client/steps";
+import { defaultSelectionId } from "@/lib/client/selection";
+import { advanceSteps, planSteps, type StepState } from "@/lib/client/steps";
 import { modelLabel } from "@/lib/models";
 import { MAX_PROMPT_CHARACTERS, type ModelInfo, type ModelsResponse, type OptimizeResult } from "@/lib/types";
 
 const SESSION_KEY = "arc-po-session";
+/** The model rewrites every prompt before the run; the API also accepts `rewrite: false`. */
+const REWRITE = true;
 
 type Phase = "idle" | "confirm" | "running" | "done";
 
@@ -33,7 +36,8 @@ function loadSession(): PersistedSession | undefined {
       prompt: typeof parsed.prompt === "string" ? parsed.prompt : "",
       model: typeof parsed.model === "string" ? parsed.model : "",
       judge: typeof parsed.judge === "boolean" ? parsed.judge : true,
-      result: parsed.result ?? null,
+      // Results saved before the rewrite existed have no rewrite report.
+      result: parsed.result ? { ...parsed.result, rewrite: parsed.result.rewrite ?? { status: "not_requested" } } : null,
       selectedId: typeof parsed.selectedId === "string" ? parsed.selectedId : null,
       edited: parsed.edited ?? {},
     };
@@ -51,11 +55,10 @@ export function OptimizeView() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [judgeAvailable, setJudgeAvailable] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
-  const [doneCount, setDoneCount] = useState(0);
+  const [stepState, setStepState] = useState<StepState>(() => planSteps(true, REWRITE));
   const [result, setResult] = useState<OptimizeResult | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [edited, setEdited] = useState<Record<string, string>>({});
-  const [runJudge, setRunJudge] = useState(true);
   const controllerRef = useRef<AbortController | null>(null);
 
   // Restore the last prompt and result from sessionStorage so a refresh does not lose them.
@@ -125,22 +128,22 @@ export function OptimizeView() {
     const controller = new AbortController();
     controllerRef.current = controller;
     const judgeForRun = effectiveJudge;
-    setRunJudge(judgeForRun);
+    setStepState(planSteps(judgeForRun, REWRITE));
     setPhase("running");
-    setDoneCount(0);
     setResult(null);
     setSelectedId(null);
     setEdited({});
     try {
       const next = await streamOptimize(
-        { prompt, model: model as OptimizeResult["model"], judge: judgeForRun },
+        { prompt, model: model as OptimizeResult["model"], judge: judgeForRun, rewrite: REWRITE },
         controller.signal,
-        () => setDoneCount((count) => count + 1),
+        (event) => setStepState((state) => advanceSteps(state, event)),
       );
       if (controller.signal.aborted) return;
       setResult(next);
-      setSelectedId(next.ranking[0]?.candidateId ?? null);
+      setSelectedId(defaultSelectionId(next));
       setPhase("done");
+      if (next.rewrite.status === "failed") toast.warning("The rewrite failed; ranking the other four candidates.");
       if (judgeForRun && next.judge.status === "failed") toast.warning("Jev judging failed; showing the deterministic ranking.");
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -156,8 +159,8 @@ export function OptimizeView() {
       <div className="flex flex-col gap-2">
         <h1 className="m-0 text-3xl font-semibold leading-tight tracking-[-0.025em]">Optimize a prompt</h1>
         <p className="m-0 text-[15px] leading-relaxed text-muted-foreground text-pretty">
-          Paste a prompt. The optimizer renders three pattern variants, runs the baseline and each variant with the model you pick, scores the
-          outputs, and ranks them.
+          Paste a prompt. The model you pick rewrites it, the optimizer renders three pattern variants, runs the baseline and every candidate
+          with that model, scores the outputs, and ranks them.
         </p>
       </div>
 
@@ -179,7 +182,7 @@ export function OptimizeView() {
       />
 
       {phase === "running" ? (
-        <ProgressPanel modelLabel={currentModelLabel} steps={stepLabels(runJudge)} doneCount={doneCount} onCancel={cancelRun} />
+        <ProgressPanel modelLabel={currentModelLabel} state={stepState} onCancel={cancelRun} />
       ) : null}
 
       {phase === "done" && result ? (
@@ -196,6 +199,7 @@ export function OptimizeView() {
         open={phase === "confirm"}
         modelLabel={currentModelLabel}
         judge={effectiveJudge}
+        rewrite={REWRITE}
         onCancel={() => setPhase(result ? "done" : "idle")}
         onRun={() => void startRun()}
       />

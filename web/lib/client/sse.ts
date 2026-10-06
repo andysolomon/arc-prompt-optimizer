@@ -1,4 +1,4 @@
-import type { OptimizeRequest, OptimizeResult, StepEvent } from "@/lib/types";
+import type { OptimizeRequestBody, OptimizeResult, StepEvent } from "@/lib/types";
 
 export class OptimizeRequestError extends Error {
   readonly status: number;
@@ -39,7 +39,7 @@ export function parseSseChunk(buffer: string): { messages: SseMessage[]; rest: s
  * result. Aborting `signal` cancels the fetch, which aborts the server run.
  */
 export async function streamOptimize(
-  body: OptimizeRequest,
+  body: OptimizeRequestBody,
   signal: AbortSignal,
   onStep: (event: StepEvent) => void,
 ): Promise<OptimizeResult> {

@@ -33,8 +33,15 @@ export type ModelId = (typeof MODEL_IDS)[number];
 
 export const MAX_PROMPT_CHARACTERS = 16_384;
 
-/** The preview run always produces one completion per candidate: baseline plus three variants. */
-export const COMPLETION_COUNT = 4;
+/** One completion per candidate (baseline plus three variants), plus the rewrite and its run when requested. */
+export function completionCount(rewrite: boolean): number {
+  return rewrite ? 6 : 4;
+}
+
+/** Candidates ranked in a run: baseline, three pattern variants, and the rewrite when requested. */
+export function candidateCount(rewrite: boolean): number {
+  return rewrite ? 5 : 4;
+}
 
 export const optimizeRequestSchema = z.object({
   prompt: z
@@ -45,9 +52,13 @@ export const optimizeRequestSchema = z.object({
     .refine((value) => value.trim().length > 0, { error: "Prompt must not be empty." }),
   model: z.enum(MODEL_IDS, { error: "Model is not in the allowed list." }),
   judge: z.boolean({ error: "judge must be a boolean." }),
+  /** Ask the model to rewrite the prompt first and rank the rewrite as an extra candidate. Defaults to true. */
+  rewrite: z.boolean({ error: "rewrite must be a boolean." }).default(true),
 });
 
 export type OptimizeRequest = z.infer<typeof optimizeRequestSchema>;
+/** Request body as sent by a client; `rewrite` may be omitted. */
+export type OptimizeRequestBody = z.input<typeof optimizeRequestSchema>;
 
 export const measurementSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("measured"), value: z.number() }),
@@ -167,12 +178,33 @@ export const judgeReportSchema = z.discriminatedUnion("status", [
 
 export type JudgeReport = z.infer<typeof judgeReportSchema>;
 
+export const rewriteReportSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("not_requested") }),
+  z.object({
+    status: z.literal("rewritten"),
+    candidateId: z.string(),
+    analysis: z.array(z.string()),
+    changes: z.array(z.string()),
+    measurements: z.object({
+      latencyMs: measurementSchema,
+      inputTokens: measurementSchema,
+      outputTokens: measurementSchema,
+      totalTokens: measurementSchema,
+      costUsd: measurementSchema,
+    }),
+  }),
+  z.object({ status: z.literal("failed"), reason: z.string() }),
+]);
+
+export type RewriteReport = z.infer<typeof rewriteReportSchema>;
+
 export const optimizeResultSchema = z.object({
   baselineCandidateId: z.string(),
   candidates: z.array(promptCandidateSchema),
   evaluations: z.array(candidateEvaluationSchema),
   ranking: z.array(rankedCandidateSchema),
   judge: judgeReportSchema,
+  rewrite: rewriteReportSchema,
   completionsUsed: z.number(),
   model: z.enum(MODEL_IDS),
 });
@@ -187,17 +219,23 @@ export interface OptimizeResult {
   readonly evaluations: readonly CandidateEvaluation[];
   readonly ranking: readonly RankedCandidate[];
   readonly judge: JudgeReport;
+  readonly rewrite: RewriteReport;
+  /** Every completion requested from the model, including the rewrite. */
   readonly completionsUsed: number;
   readonly model: ModelId;
 }
 
 /** Fixed step order of a run. `run:<candidateId>` repeats once per candidate. */
-export type StepName = "render" | `run:${string}` | "judge" | "rank";
+export type StepName = "rewrite" | "render" | `run:${string}` | "judge" | "rank";
 
 export type StepEvent = {
   readonly step: StepName;
   /** Candidate ids in run order, sent with the `render` step so the client can label `run:` steps. */
   readonly candidateIds?: readonly string[];
+  /** Human labels matching `candidateIds`, sent with the `render` step. */
+  readonly candidateLabels?: readonly string[];
+  /** Sent with the `rewrite` step. */
+  readonly status?: "rewritten" | "failed";
 };
 
 export const modelInfoSchema = z.object({

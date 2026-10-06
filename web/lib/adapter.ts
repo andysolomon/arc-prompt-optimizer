@@ -2,19 +2,28 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { extractReasoningMiddleware, generateText, wrapLanguageModel, type LanguageModel } from "ai";
+import { defaultSettingsMiddleware, extractReasoningMiddleware, generateText, wrapLanguageModel, type LanguageModel } from "ai";
 import { MAX_COMPLETION_OUTPUT_CHARACTERS } from "@/lib/arc-core/adapters/index.js";
+import { REWRITE_PROTOCOL } from "@/lib/arc-core/core/index.js";
 import type { CompletionAdapter, CompletionRequest, CompletionResult } from "@/lib/arc-core/core/index.js";
 import type { ServerEnv } from "@/lib/env";
-import { OPENAI_COMPATIBLE_BASE_URLS, getModel, type ModelDefinition } from "@/lib/models";
+import { OPENAI_COMPATIBLE_BASE_URLS, getModel, isReasoningProvider, type ModelDefinition } from "@/lib/models";
 import { estimateCostUsd } from "@/lib/pricing";
 import type { ModelId } from "@/lib/types";
 
 /** Rough character-to-token ratio used only to cap generation so outputs fit the core's character limit. */
 export const CHARACTERS_PER_TOKEN_ESTIMATE = 4;
 
-export function outputCharacterLimitToMaxTokens(limit: number): number {
-  return Math.max(1, Math.ceil(limit / CHARACTERS_PER_TOKEN_ESTIMATE));
+/**
+ * Thinking models spend part of the token budget on hidden reasoning before any answer text, so a cap sized for the
+ * answer alone ends with empty output (GLM-5.3 used all 4,096 tokens reasoning on a prompt rewrite). Their cap
+ * leaves room for reasoning; the answer itself is still cut to the character limit.
+ */
+export const REASONING_MAX_OUTPUT_TOKENS = 16_384;
+
+export function outputCharacterLimitToMaxTokens(limit: number, reasoning = false): number {
+  const answerTokens = Math.max(1, Math.ceil(limit / CHARACTERS_PER_TOKEN_ESTIMATE));
+  return reasoning ? Math.max(answerTokens, REASONING_MAX_OUTPUT_TOKENS) : answerTokens;
 }
 
 export function providerApiKey(model: ModelDefinition, env: ServerEnv): string | undefined {
@@ -44,6 +53,8 @@ export const CLIENT_USER_AGENT = "arc-prompt-optimizer-web/0.1.0";
 /**
  * MiniMax and the OpenCode Go gateway speak the OpenAI chat-completions dialect. Their reasoning models
  * return thinking inline as `<think>…</think>`, which the middleware strips so only the answer is scored.
+ * Reasoning effort defaults to low: measured on the rewrite prompt, it cut GLM-5.3 from no answer within 4,096
+ * tokens to 18 s, DeepSeek V4 Pro from 88 s to 26 s, and MiniMax M3 from 40 s to 25 s.
  * OpenCode Go requires clients to identify themselves and to send a stable `x-opencode-session` per
  * conversation; one optimization run is one session.
  */
@@ -53,7 +64,10 @@ function openAiCompatibleModel(provider: "minimax" | "opencode-go", providerMode
   const compatible = createOpenAICompatible({ name: provider, baseURL: OPENAI_COMPATIBLE_BASE_URLS[provider], apiKey, headers });
   return wrapLanguageModel({
     model: compatible.chatModel(providerModelId),
-    middleware: extractReasoningMiddleware({ tagName: "think" }),
+    middleware: [
+      defaultSettingsMiddleware({ settings: { providerOptions: { [provider]: { reasoningEffort: "low" } } } }),
+      extractReasoningMiddleware({ tagName: "think" }),
+    ],
   });
 }
 
@@ -114,9 +128,11 @@ export class AiSdkCompletionAdapter implements CompletionAdapter {
   readonly #modelId: ModelId;
   readonly #model: LanguageModel;
   readonly #generate: GenerateTextFn;
+  readonly #reasoning: boolean;
 
   constructor(modelId: ModelId, env: ServerEnv, generate: GenerateTextFn = generateText as unknown as GenerateTextFn) {
     this.#modelId = modelId;
+    this.#reasoning = isReasoningProvider(getModel(modelId).provider);
     this.#model = languageModelFor(modelId, env);
     this.#generate = generate;
   }
@@ -127,7 +143,7 @@ export class AiSdkCompletionAdapter implements CompletionAdapter {
     const generated = await this.#generate({
       model: this.#model,
       prompt: request.prompt,
-      maxOutputTokens: outputCharacterLimitToMaxTokens(outputLimit),
+      maxOutputTokens: outputCharacterLimitToMaxTokens(outputLimit, this.#reasoning),
       ...(signal === undefined ? {} : { abortSignal: signal }),
     });
     return toCompletionResult({
@@ -159,7 +175,9 @@ export class MockCompletionAdapter implements CompletionAdapter {
     this.#calls += 1;
     await new Promise((resolve) => setTimeout(resolve, 150));
     const firstLine = request.prompt.split("\n")[0] ?? "";
-    const text = `Mock output ${this.#calls} for: ${firstLine.slice(0, 80)}`;
+    const text = request.prompt.startsWith(REWRITE_PROTOCOL)
+      ? mockRewriteReply(request.prompt)
+      : `Mock output ${this.#calls} for: ${firstLine.slice(0, 80)}`;
     return toCompletionResult({
       modelId: this.#modelId,
       text,
@@ -170,4 +188,33 @@ export class MockCompletionAdapter implements CompletionAdapter {
       outputLimit: request.maxOutputCharacters ?? MAX_COMPLETION_OUTPUT_CHARACTERS,
     });
   }
+}
+
+/** Canned reply to the rewrite meta-prompt: wraps the fenced draft in a role, format, and constraints. */
+function mockRewriteReply(metaPrompt: string): string {
+  const fenced = /(`{3,})\n([\s\S]*)\n\1$/u.exec(metaPrompt);
+  const draft = fenced?.[2] ?? "";
+  return [
+    "<analysis>",
+    "- No role or audience is stated.",
+    "- No output format or length.",
+    "</analysis>",
+    "",
+    "<rewritten_prompt>",
+    "You are a senior analyst writing for a busy, non-technical reader.",
+    "",
+    "<task>",
+    draft,
+    "</task>",
+    "",
+    "Respond with exactly 5 bullet points of at most 20 words each.",
+    "Do NOT include speculation. If information is missing, say so in one bullet.",
+    "</rewritten_prompt>",
+    "",
+    "<changes>",
+    "1. Added a specific role to set the register.",
+    "2. Fixed the format and length so outputs are comparable.",
+    "3. Added a negative and a conditional constraint.",
+    "</changes>",
+  ].join("\n");
 }

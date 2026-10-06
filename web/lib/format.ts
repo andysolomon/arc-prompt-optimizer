@@ -15,6 +15,7 @@ export function formatCharacterCount(length: number): string {
 
 const LABELS: Readonly<Record<string, string>> = {
   baseline: "Baseline",
+  rewrite: "Rewrite",
   critique: "Critique",
   decomposition: "Decomposition",
   structured_reasoning: "Structured reasoning",
