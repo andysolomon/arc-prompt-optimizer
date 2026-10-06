@@ -40,6 +40,10 @@ A Pi install (see [Pi package](#pi-package)) provides both the native `/prompt-o
 
 The harness workflow has trade-offs. The same agent writes the variants and produces their outputs, scores come from deterministic checks only, the default preview suite only checks that outputs are non-empty, and latency, tokens, and cost stay unknown unless the harness reports them. See [docs/user-guide.md](docs/user-guide.md#harness-agnostic-workflow).
 
+### Web app
+
+The [`web/`](web/README.md) directory holds a Next.js frontend for Vercel. Paste a prompt, pick a model (Claude Sonnet 4.5, Claude Haiku 4.5, GPT-5 mini, or Gemini 2.5 Flash), confirm, and it runs the same four preview candidates through the core evaluation and ranking, optionally judged by TypeSafe's Jev. See [web/README.md](web/README.md) for setup, environment variables, and the deploy button.
+
 ### Standalone CLI
 
 ```sh
