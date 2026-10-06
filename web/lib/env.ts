@@ -4,6 +4,8 @@ export interface ServerEnv {
   readonly ANTHROPIC_API_KEY?: string;
   readonly OPENAI_API_KEY?: string;
   readonly GOOGLE_GENERATIVE_AI_API_KEY?: string;
+  readonly MINIMAX_API_KEY?: string;
+  readonly OPENCODE_API_KEY?: string;
   readonly TYPESAFE_API_KEY?: string;
   readonly UPSTASH_REDIS_REST_URL?: string;
   readonly UPSTASH_REDIS_REST_TOKEN?: string;
@@ -22,6 +24,8 @@ export function readServerEnv(source: NodeJS.ProcessEnv = process.env): ServerEn
     ANTHROPIC_API_KEY: clean(source.ANTHROPIC_API_KEY),
     OPENAI_API_KEY: clean(source.OPENAI_API_KEY),
     GOOGLE_GENERATIVE_AI_API_KEY: clean(source.GOOGLE_GENERATIVE_AI_API_KEY),
+    MINIMAX_API_KEY: clean(source.MINIMAX_API_KEY),
+    OPENCODE_API_KEY: clean(source.OPENCODE_API_KEY),
     TYPESAFE_API_KEY: clean(source.TYPESAFE_API_KEY),
     UPSTASH_REDIS_REST_URL: clean(source.UPSTASH_REDIS_REST_URL ?? source.KV_REST_API_URL),
     UPSTASH_REDIS_REST_TOKEN: clean(source.UPSTASH_REDIS_REST_TOKEN ?? source.KV_REST_API_TOKEN),

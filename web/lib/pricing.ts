@@ -1,8 +1,9 @@
 import type { ModelId } from "@/lib/types";
 
 /**
- * USD per one million tokens. Snapshot of published list prices; update when providers change them.
- * A model that is missing here reports cost as unknown, never as 0.
+ * USD per one million tokens. Snapshot of published pay-as-you-go list prices; update when providers change them.
+ * A model that is missing here reports cost as unknown, never as 0. OpenCode Go is a flat subscription, so its
+ * models are deliberately absent and show cost as n/a.
  */
 export const PRICING_USD_PER_MILLION: Readonly<Partial<Record<ModelId, { input: number; output: number }>>> =
   Object.freeze({
@@ -10,6 +11,8 @@ export const PRICING_USD_PER_MILLION: Readonly<Partial<Record<ModelId, { input: 
     "anthropic/claude-haiku-4-5": { input: 1, output: 5 },
     "openai/gpt-5-mini": { input: 0.25, output: 2 },
     "google/gemini-2.5-flash": { input: 0.3, output: 2.5 },
+    "minimax/MiniMax-M3": { input: 0.3, output: 1.2 },
+    "minimax/MiniMax-M2.7": { input: 0.3, output: 1.2 },
   });
 
 /** Returns undefined whenever the price or either token count is unknown. */

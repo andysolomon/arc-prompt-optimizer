@@ -6,8 +6,21 @@ export interface ModelDefinition extends ModelInfo {
   /** Model id passed to the provider SDK. */
   readonly providerModelId: string;
   /** Environment variable that must be present for the provider to be offered. */
-  readonly envVar: "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "GOOGLE_GENERATIVE_AI_API_KEY";
+  readonly envVar: ProviderEnvVar;
 }
+
+export type ProviderEnvVar =
+  | "ANTHROPIC_API_KEY"
+  | "OPENAI_API_KEY"
+  | "GOOGLE_GENERATIVE_AI_API_KEY"
+  | "MINIMAX_API_KEY"
+  | "OPENCODE_API_KEY";
+
+/** OpenAI-compatible chat endpoints for providers without a first-party AI SDK package. */
+export const OPENAI_COMPATIBLE_BASE_URLS: Readonly<Record<"minimax" | "opencode-go", string>> = Object.freeze({
+  minimax: "https://api.minimax.io/v1",
+  "opencode-go": "https://opencode.ai/zen/go/v1",
+});
 
 export const MODELS: readonly ModelDefinition[] = Object.freeze([
   {
@@ -37,6 +50,48 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "google",
     providerModelId: "gemini-2.5-flash",
     envVar: "GOOGLE_GENERATIVE_AI_API_KEY",
+  },
+  {
+    id: "minimax/MiniMax-M3",
+    label: "MiniMax M3",
+    provider: "minimax",
+    providerModelId: "MiniMax-M3",
+    envVar: "MINIMAX_API_KEY",
+  },
+  {
+    id: "minimax/MiniMax-M2.7",
+    label: "MiniMax M2.7",
+    provider: "minimax",
+    providerModelId: "MiniMax-M2.7",
+    envVar: "MINIMAX_API_KEY",
+  },
+  {
+    id: "opencode-go/deepseek-v4-pro",
+    label: "DeepSeek V4 Pro (OpenCode Go)",
+    provider: "opencode-go",
+    providerModelId: "deepseek-v4-pro",
+    envVar: "OPENCODE_API_KEY",
+  },
+  {
+    id: "opencode-go/glm-5.3",
+    label: "GLM-5.3 (OpenCode Go)",
+    provider: "opencode-go",
+    providerModelId: "glm-5.3",
+    envVar: "OPENCODE_API_KEY",
+  },
+  {
+    id: "opencode-go/kimi-k2.6",
+    label: "Kimi K2.6 (OpenCode Go)",
+    provider: "opencode-go",
+    providerModelId: "kimi-k2.6",
+    envVar: "OPENCODE_API_KEY",
+  },
+  {
+    id: "opencode-go/qwen3.7-plus",
+    label: "Qwen3.7 Plus (OpenCode Go)",
+    provider: "opencode-go",
+    providerModelId: "qwen3.7-plus",
+    envVar: "OPENCODE_API_KEY",
   },
 ]);
 

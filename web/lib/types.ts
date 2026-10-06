@@ -21,6 +21,12 @@ export const MODEL_IDS = [
   "anthropic/claude-haiku-4-5",
   "openai/gpt-5-mini",
   "google/gemini-2.5-flash",
+  "minimax/MiniMax-M3",
+  "minimax/MiniMax-M2.7",
+  "opencode-go/deepseek-v4-pro",
+  "opencode-go/glm-5.3",
+  "opencode-go/kimi-k2.6",
+  "opencode-go/qwen3.7-plus",
 ] as const;
 
 export type ModelId = (typeof MODEL_IDS)[number];
@@ -197,7 +203,7 @@ export type StepEvent = {
 export const modelInfoSchema = z.object({
   id: z.enum(MODEL_IDS),
   label: z.string(),
-  provider: z.enum(["anthropic", "openai", "google"]),
+  provider: z.enum(["anthropic", "openai", "google", "minimax", "opencode-go"]),
 });
 
 export type ModelInfo = z.infer<typeof modelInfoSchema>;

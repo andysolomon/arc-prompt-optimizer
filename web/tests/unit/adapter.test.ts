@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { AiSdkCompletionAdapter, languageModelFor, outputCharacterLimitToMaxTokens, toCompletionResult } from "@/lib/adapter";
 import type { ServerEnv } from "@/lib/env";
-import { MODELS, availableModels, getModel } from "@/lib/models";
+import { MODELS, OPENAI_COMPATIBLE_BASE_URLS, availableModels, getModel } from "@/lib/models";
 import { MODEL_IDS } from "@/lib/types";
 
 const fullEnv: ServerEnv = {
   ANTHROPIC_API_KEY: "a",
   OPENAI_API_KEY: "o",
   GOOGLE_GENERATIVE_AI_API_KEY: "g",
+  MINIMAX_API_KEY: "m",
+  OPENCODE_API_KEY: "z",
 };
 
 describe("model mapping", () => {
@@ -17,6 +19,13 @@ describe("model mapping", () => {
     expect(getModel("anthropic/claude-haiku-4-5")).toMatchObject({ provider: "anthropic", providerModelId: "claude-haiku-4-5" });
     expect(getModel("openai/gpt-5-mini")).toMatchObject({ provider: "openai", providerModelId: "gpt-5-mini", envVar: "OPENAI_API_KEY" });
     expect(getModel("google/gemini-2.5-flash")).toMatchObject({ provider: "google", providerModelId: "gemini-2.5-flash", envVar: "GOOGLE_GENERATIVE_AI_API_KEY" });
+    expect(getModel("minimax/MiniMax-M3")).toMatchObject({ provider: "minimax", providerModelId: "MiniMax-M3", envVar: "MINIMAX_API_KEY" });
+    expect(getModel("opencode-go/kimi-k2.6")).toMatchObject({ provider: "opencode-go", providerModelId: "kimi-k2.6", envVar: "OPENCODE_API_KEY" });
+  });
+
+  it("routes MiniMax and OpenCode Go through their OpenAI-compatible endpoints", () => {
+    expect(OPENAI_COMPATIBLE_BASE_URLS.minimax).toBe("https://api.minimax.io/v1");
+    expect(OPENAI_COMPATIBLE_BASE_URLS["opencode-go"]).toBe("https://opencode.ai/zen/go/v1");
   });
 
   it("builds an AI SDK model for each id and reports the provider in the model id", () => {
@@ -35,6 +44,14 @@ describe("model mapping", () => {
     expect(availableModels({}).map((m) => m.id)).toEqual([]);
     expect(availableModels({ OPENAI_API_KEY: "x", GOOGLE_GENERATIVE_AI_API_KEY: " " }).map((m) => m.id)).toEqual(["openai/gpt-5-mini"]);
     expect(availableModels({ ANTHROPIC_API_KEY: "x" }).map((m) => m.id)).toEqual(["anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5"]);
+    expect(availableModels({ MINIMAX_API_KEY: "x" }).map((m) => m.id)).toEqual(["minimax/MiniMax-M3", "minimax/MiniMax-M2.7"]);
+    expect(availableModels({ OPENCODE_API_KEY: "x" }).map((m) => m.provider)).toEqual(["opencode-go", "opencode-go", "opencode-go", "opencode-go"]);
+  });
+
+  it("leaves OpenCode Go cost unknown because the plan is a flat subscription", () => {
+    const result = toCompletionResult({ modelId: "opencode-go/glm-5.3", text: "x", finishReason: "stop", latencyMs: 1, inputTokens: 10, outputTokens: 10, outputLimit: 100 });
+    expect(result.costUsd).toBeUndefined();
+    expect(toCompletionResult({ modelId: "minimax/MiniMax-M3", text: "x", finishReason: "stop", latencyMs: 1, inputTokens: 1_000_000, outputTokens: 1_000_000, outputLimit: 100 }).costUsd).toBeCloseTo(1.5);
   });
 });
 

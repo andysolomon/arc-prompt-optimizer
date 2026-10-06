@@ -1,11 +1,12 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText, type LanguageModel } from "ai";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { extractReasoningMiddleware, generateText, wrapLanguageModel, type LanguageModel } from "ai";
 import { MAX_COMPLETION_OUTPUT_CHARACTERS } from "@/lib/arc-core/adapters/index.js";
 import type { CompletionAdapter, CompletionRequest, CompletionResult } from "@/lib/arc-core/core/index.js";
 import type { ServerEnv } from "@/lib/env";
-import { getModel, type ModelDefinition } from "@/lib/models";
+import { OPENAI_COMPATIBLE_BASE_URLS, getModel, type ModelDefinition } from "@/lib/models";
 import { estimateCostUsd } from "@/lib/pricing";
 import type { ModelId } from "@/lib/types";
 
@@ -32,7 +33,28 @@ export function languageModelFor(id: ModelId, env: ServerEnv): LanguageModel {
       return createOpenAI({ apiKey })(model.providerModelId);
     case "google":
       return createGoogleGenerativeAI({ apiKey })(model.providerModelId);
+    case "minimax":
+    case "opencode-go":
+      return openAiCompatibleModel(model.provider, model.providerModelId, apiKey);
   }
+}
+
+export const CLIENT_USER_AGENT = "arc-prompt-optimizer-web/0.1.0";
+
+/**
+ * MiniMax and the OpenCode Go gateway speak the OpenAI chat-completions dialect. Their reasoning models
+ * return thinking inline as `<think>…</think>`, which the middleware strips so only the answer is scored.
+ * OpenCode Go requires clients to identify themselves and to send a stable `x-opencode-session` per
+ * conversation; one optimization run is one session.
+ */
+function openAiCompatibleModel(provider: "minimax" | "opencode-go", providerModelId: string, apiKey: string): LanguageModel {
+  const headers: Record<string, string> = { "User-Agent": CLIENT_USER_AGENT };
+  if (provider === "opencode-go") headers["x-opencode-session"] = crypto.randomUUID();
+  const compatible = createOpenAICompatible({ name: provider, baseURL: OPENAI_COMPATIBLE_BASE_URLS[provider], apiKey, headers });
+  return wrapLanguageModel({
+    model: compatible.chatModel(providerModelId),
+    middleware: extractReasoningMiddleware({ tagName: "think" }),
+  });
 }
 
 export type GenerateTextFn = (args: {

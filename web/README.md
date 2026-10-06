@@ -36,6 +36,8 @@ The first Playwright run needs a browser: `pnpm exec playwright install chromium
 | `ANTHROPIC_API_KEY` | Enables Claude Sonnet 4.5 and Claude Haiku 4.5. |
 | `OPENAI_API_KEY` | Enables GPT-5 mini. |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Enables Gemini 2.5 Flash. |
+| `MINIMAX_API_KEY` | MiniMax platform or Coding Plan key. Enables MiniMax M3 and MiniMax M2.7 through `https://api.minimax.io/v1`. |
+| `OPENCODE_API_KEY` | OpenCode Go subscription key. Enables DeepSeek V4 Pro, GLM-5.3, Kimi K2.6, and Qwen3.7 Plus through `https://opencode.ai/zen/go/v1`. |
 | `TYPESAFE_API_KEY` | Enables the "Judge with Jev" switch. Without it the switch is disabled with a tooltip. |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Optional shared store for the per-IP rate limit (`KV_REST_API_URL` / `KV_REST_API_TOKEN` from Vercel KV are accepted too). Without them the limit lives in process memory, per instance. |
 | `ARC_MOCK_PROVIDERS` | Test-only. `1` serves canned completions and judge answers. Ignored when `VERCEL_ENV=production`. |
@@ -54,11 +56,13 @@ The app starts with any subset of keys. `GET /api/models` returns only the model
 
 ### `POST /api/optimize`
 
-Body: `{ "prompt": string, "model": string, "judge": boolean }`. The prompt must be non-empty and at most 16,384 characters; the model must be one of `anthropic/claude-sonnet-4-5`, `anthropic/claude-haiku-4-5`, `openai/gpt-5-mini`, `google/gemini-2.5-flash` and its provider key must be configured. Invalid requests return 400 with `{ "error": string }`; the per-IP limit of 10 runs per 10 minutes returns 429.
+Body: `{ "prompt": string, "model": string, "judge": boolean }`. The prompt must be non-empty and at most 16,384 characters; the model must be one of the ids in `lib/models.ts` (`anthropic/claude-sonnet-4-5`, `anthropic/claude-haiku-4-5`, `openai/gpt-5-mini`, `google/gemini-2.5-flash`, `minimax/MiniMax-M3`, `minimax/MiniMax-M2.7`, `opencode-go/deepseek-v4-pro`, `opencode-go/glm-5.3`, `opencode-go/kimi-k2.6`, `opencode-go/qwen3.7-plus`) and its provider key must be configured. Invalid requests return 400 with `{ "error": string }`; the per-IP limit of 10 runs per 10 minutes returns 429.
 
 With `Accept: text/event-stream` the route streams Server-Sent Events, one per completed step (`render`, `run:<candidateId>` ×4, `judge` when requested, `rank`), then a final `result` event. Without that header it returns the same result as a JSON body. The result is `{ baselineCandidateId, candidates, evaluations, ranking, judge, completionsUsed, model }`, where `candidates`, `evaluations`, and `ranking` are the core library's `PromptCandidate[]`, `CandidateEvaluation[]`, and `RankedCandidate[]`.
 
-Each completion runs through the Vercel AI SDK with a 60 s timeout and is aborted when the client disconnects. `latencyMs`, `usage.inputTokens`, and `usage.outputTokens` are recorded from the provider response; `costUsd` is computed from the list prices in `lib/pricing.ts` only when both token counts are known and is otherwise left unknown (shown as `n/a`), never reported as 0.
+Each completion runs through the Vercel AI SDK with a 60 s timeout and is aborted when the client disconnects. `latencyMs`, `usage.inputTokens`, and `usage.outputTokens` are recorded from the provider response; `costUsd` is computed from the pay-as-you-go list prices in `lib/pricing.ts` only when both token counts are known and is otherwise left unknown (shown as `n/a`), never reported as 0. OpenCode Go models have no entry because the plan is a flat subscription, so their cost always shows `n/a`; with a MiniMax Coding Plan key the MiniMax figure is a list-price reference rather than a charge.
+
+MiniMax and OpenCode Go are reached through the AI SDK's OpenAI-compatible provider. Their reasoning models return thinking inline as `<think>…</think>`; the adapter strips it so only the answer is scored and measured.
 
 When `judge` is true the route makes one request to `POST https://api.typesafe.ai/v1/systemone` with model `jev-latest`. The request `state` holds every candidate's `{ prompt, output }` pair, and one Score question per candidate asks "How well does the output fulfil the task in the prompt?" over the four levels *Off-task or empty*, *Addresses the task but incomplete or vague*, *Complete and accurate, some loose ends*, *Complete, accurate, and clearly organized* (each question names the pair it should judge). The returned `score` is divided by 3 and fed to the core as the judge score with the objective `{ deterministicWeight: 1, judgeWeight: 1, tieBreakers: ["totalTokens", "latencyMs", "costUsd"] }`. The raw `score`, `confidence`, `probabilities`, and `legend` are kept under `judge.answers[candidateId]`. If TypeSafe fails, the response carries the deterministic ranking and `judge: { status: "failed", reason }`.
 

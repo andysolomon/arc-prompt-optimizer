@@ -88,7 +88,8 @@ export function PromptForm({
       </div>
       {noModels ? (
         <p role="status" className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          No model providers are configured. Set at least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_GENERATIVE_AI_API_KEY on the server.
+          No model providers are configured. Set at least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, MINIMAX_API_KEY, or
+          OPENCODE_API_KEY on the server.
         </p>
       ) : null}
     </form>
