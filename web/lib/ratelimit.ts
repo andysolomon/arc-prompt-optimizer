@@ -44,27 +44,30 @@ export class MemoryRateLimiter implements RateLimiter {
   }
 }
 
-let cached: RateLimiter | undefined;
+const cached = new Map<string, RateLimiter>();
 
-export function rateLimiterFor(env: ServerEnv): RateLimiter {
-  if (cached !== undefined) return cached;
+export function rateLimiterFor(env: ServerEnv, scope: "optimize" | "categorize" = "optimize"): RateLimiter {
+  const previous = cached.get(scope);
+  if (previous) return previous;
+  let limiter: RateLimiter;
   if (env.UPSTASH_REDIS_REST_URL !== undefined && env.UPSTASH_REDIS_REST_TOKEN !== undefined) {
     const upstash = new Ratelimit({
       redis: new Redis({ url: env.UPSTASH_REDIS_REST_URL, token: env.UPSTASH_REDIS_REST_TOKEN }),
       limiter: Ratelimit.slidingWindow(RATE_LIMIT_RUNS, "10 m"),
-      prefix: "arc-prompt-optimizer:optimize",
+      prefix: `arc-prompt-optimizer:${scope}`,
       analytics: false,
     });
-    cached = {
+    limiter = {
       async limit(key) {
         const result = await upstash.limit(key);
         return { success: result.success, remaining: result.remaining, reset: result.reset };
       },
     };
   } else {
-    cached = new MemoryRateLimiter();
+    limiter = new MemoryRateLimiter();
   }
-  return cached;
+  cached.set(scope, limiter);
+  return limiter;
 }
 
 export function clientIp(headers: Headers): string {
@@ -76,7 +79,7 @@ export function clientIp(headers: Headers): string {
   return headers.get("x-real-ip")?.trim() || "unknown";
 }
 
-export function rateLimitMessage(result: RateLimitResult): string {
+export function rateLimitMessage(result: RateLimitResult, action = "runs"): string {
   const minutes = Math.max(1, Math.ceil((result.reset - Date.now()) / 60_000));
-  return `Rate limit reached: ${RATE_LIMIT_RUNS} runs per 10 minutes per IP. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+  return `Rate limit reached: ${RATE_LIMIT_RUNS} ${action} per 10 minutes per IP. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`;
 }

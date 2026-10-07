@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/", label: "Optimize" },
+  { href: "/library", label: "Library" },
   { href: "/patterns", label: "Patterns" },
   { href: "/examples", label: "Examples" },
 ] as const;

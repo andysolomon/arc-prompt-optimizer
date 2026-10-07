@@ -1,0 +1,96 @@
+import { expect, test } from "@playwright/test";
+
+test("save and categorize a draft, retain it across tabs, edit, filter, load and delete", async ({ page, context }) => {
+  let optimizations = 0;
+  page.on("request", (request) => { if (request.url().includes("/api/optimize")) optimizations++; });
+  await page.goto("/");
+  await page.getByRole("textbox", { name: "Prompt", exact: true }).fill("Write a concise release announcement.");
+  await page.getByRole("button", { name: "Save prompt", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Save prompt", exact: true });
+  await dialog.getByRole("textbox", { name: "Title", exact: true }).fill("Release announcement");
+  await dialog.getByRole("button", { name: "Suggest with Jev" }).click();
+  await expect(dialog.getByRole("status")).toContainText("Jev suggested Writing");
+  await dialog.getByRole("button", { name: "Save to library" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Run optimization?" })).toHaveCount(0);
+  expect(optimizations).toBe(0);
+
+  const library = await context.newPage();
+  await library.goto("/library");
+  await expect(library.getByRole("article")).toContainText("Release announcement");
+  await library.setViewportSize({ width: 390, height: 844 });
+  expect(await library.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(library.getByRole("article")).toContainText("Jev category · confidence 0.92");
+  await library.getByRole("combobox", { name: "Filter by category" }).selectOption("coding");
+  await expect(library.getByText("No prompts match your search or category.")).toBeVisible();
+  await library.getByRole("combobox", { name: "Filter by category" }).selectOption("writing");
+  await library.getByRole("button", { name: "Edit", exact: true }).click();
+  const edit = library.getByRole("dialog", { name: "Edit saved prompt" });
+  await edit.getByRole("textbox", { name: "Prompt text" }).fill("Write an updated release announcement.");
+  await edit.getByRole("combobox", { name: "Category", exact: true }).selectOption("planning");
+  await edit.getByRole("button", { name: "Save changes" }).click();
+  await library.getByRole("combobox", { name: "Filter by category" }).selectOption("all");
+  await expect(library.getByRole("article")).toContainText("Planning");
+  await expect(library.getByText("Jev category · confidence 0.92")).toHaveCount(0);
+  await library.reload();
+  await expect(library.getByRole("article")).toContainText("Write an updated release announcement.");
+  await library.getByRole("button", { name: "Use in Optimize" }).click();
+  await expect(library.getByRole("heading", { name: "Optimize a prompt" })).toBeVisible({ timeout: 15_000 });
+  await expect(library.getByRole("textbox", { name: "Prompt", exact: true })).toHaveValue("Write an updated release announcement.");
+  await library.getByRole("link", { name: "Library", exact: true }).click();
+  await library.getByRole("button", { name: "Delete", exact: true }).click();
+  await library.getByRole("dialog", { name: "Delete prompt?" }).getByRole("button", { name: "Delete prompt", exact: true }).click();
+  await expect(library.getByRole("article")).toHaveCount(0);
+  await library.reload();
+  await expect(library.getByRole("article")).toHaveCount(0);
+});
+
+test("Jev failure allows manual saving and backups import without duplicating records", async ({ page }) => {
+  await page.route("**/api/prompts/categorize", (route) => route.fulfill({ status: 502, json: { error: "Jev is temporarily unavailable." } }));
+  await page.goto("/library");
+  await page.getByRole("button", { name: "New prompt" }).click();
+  const dialog = page.getByRole("dialog", { name: "Save prompt", exact: true });
+  await dialog.getByRole("textbox", { name: "Title" }).fill("A saved plan");
+  await dialog.getByRole("textbox", { name: "Prompt text" }).fill("Plan a release.");
+  await dialog.getByRole("button", { name: "Suggest with Jev" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("Jev is temporarily unavailable.");
+  await dialog.getByRole("combobox", { name: "Category", exact: true }).selectOption("planning");
+  await dialog.getByRole("button", { name: "Save to library" }).click();
+  await expect(page.getByRole("article")).toContainText("Planning");
+  const backup = await page.evaluate(() => localStorage.getItem("arc-po-library-v1")!);
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  expect((await download).suggestedFilename()).toMatch(/^arc-prompts-.*\.json$/);
+  await page.getByLabel("Import prompt library").setInputFiles({ name: "backup.json", mimeType: "application/json", buffer: Buffer.from(backup) });
+  await expect(page.getByText("Library imported. Existing prompts were preserved.")).toBeVisible();
+  await expect(page.getByRole("article")).toHaveCount(1);
+  await page.getByLabel("Import prompt library").setInputFiles({ name: "invalid.json", mimeType: "application/json", buffer: Buffer.from('{"version":2,"prompts":[]}') });
+  await expect(page.getByText("This file is not a valid Arc prompt library.")).toBeVisible();
+  await expect(page.getByRole("article")).toHaveCount(1);
+});
+
+test("save the edited selected candidate and report storage failures without claiming success", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("textbox", { name: "Prompt", exact: true }).fill("Write a short email.");
+  await page.getByRole("button", { name: "Optimize", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Run", exact: true }).click();
+  const result = page.getByRole("region", { name: "Result" });
+  await expect(result).toBeVisible();
+  await result.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByLabel("Edit candidate prompt").fill("My edited winning candidate.");
+  await result.getByRole("button", { name: "Save", exact: true }).click();
+  await result.getByRole("button", { name: "Save prompt", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Save prompt", exact: true });
+  await expect(dialog.getByRole("textbox", { name: "Prompt text" })).toHaveValue("My edited winning candidate.");
+  await page.evaluate(() => { Storage.prototype.setItem = () => { throw new DOMException("Quota exceeded", "QuotaExceededError"); }; });
+  await dialog.getByRole("button", { name: "Save to library" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("Browser storage may be full or unavailable.");
+  await expect(dialog).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("arc-po-library-v1"))).toBeNull();
+  // Reload restores the real storage implementation; the edited candidate can then be saved.
+  await page.reload();
+  await page.getByRole("region", { name: "Result" }).getByRole("button", { name: "Save prompt", exact: true }).click();
+  await page.getByRole("dialog", { name: "Save prompt", exact: true }).getByRole("button", { name: "Save to library" }).click();
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  await expect(page.getByRole("article")).toContainText("My edited winning candidate.");
+});

@@ -1,10 +1,16 @@
 # Arc Prompt Optimizer · web
 
-Web frontend for [arc-prompt-optimizer](https://github.com/andysolomon/arc-prompt-optimizer). Paste a prompt, pick a model, confirm, and the model first rewrites your prompt with a role, an explicit format, constraints, and examples. The app then renders the baseline plus all nine catalog pattern variants, runs one completion per candidate, including the rewrite, scores the outputs with the core's deterministic checks, optionally asks TypeSafe's Jev one Score question per candidate, and ranks the result. Nothing calls a model until you confirm, and prompts and outputs are never logged, persisted, or submitted anywhere other than the provider you chose.
+Web frontend for [arc-prompt-optimizer](https://github.com/andysolomon/arc-prompt-optimizer). Paste a prompt, pick a model, confirm, and the model first rewrites your prompt with a role, an explicit format, constraints, and examples. The app then renders the baseline plus all nine catalog pattern variants, runs one completion per candidate, including the rewrite, scores the outputs with the core's deterministic checks, optionally asks TypeSafe's Jev one Score question per candidate, and ranks the result. Optimization calls a model only after confirmation. Save prompts in the browser's Library and explicitly request Jev category suggestions when needed. The server never logs or persists prompt content.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fandysolomon%2Farc-prompt-optimizer&root-directory=web&project-name=arc-prompt-optimizer&repository-name=arc-prompt-optimizer&env=ANTHROPIC_API_KEY,OPENAI_API_KEY,GOOGLE_GENERATIVE_AI_API_KEY,TYPESAFE_API_KEY&envDescription=Provider%20keys%20are%20optional%3B%20set%20any%20subset.&envLink=https%3A%2F%2Fgithub.com%2Fandysolomon%2Farc-prompt-optimizer%2Fblob%2Fmain%2Fweb%2FREADME.md%23environment)
 
 The Examples tab contains a complete, copyable prompt for each catalog pattern. “Use this prompt” loads it into Optimize for editing without starting a model run.
+
+## Saved prompts
+
+“Save prompt” on the draft or selected candidate opens an editor for the title, exact prompt text, and category. The Library tab also lets you create prompts, search titles and text, filter by category, copy, edit, delete, and load prompts into Optimize without starting a run. Library prompts live in `localStorage` on this browser and origin and survive closing a tab. They are not shared between devices or synced to an account. Export a JSON backup and import it in another browser; imports add missing IDs and preserve existing local records. The library supports up to 500 prompts, each at most 48,000 characters, subject to browser storage capacity. Optimize accepts up to 16,384 characters, so longer saved candidates can be copied or shortened in Edit.
+
+With `TYPESAFE_API_KEY` configured, “Suggest with Jev” sends only the editor's prompt text to TypeSafe. A [Choice question](https://docs.typesafe.ai/primitives/choice) selects Coding, Writing, Research, Summarization, Analysis, Planning, Creative, or Other. The category and confidence are shown for review before saving. You can change the category manually; Jev failures never prevent a manual save. Clearing browser site data removes the library, so use Export for backups.
 
 ## Stack
 
@@ -40,7 +46,7 @@ The first Playwright run needs a browser: `pnpm exec playwright install chromium
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Enables Gemini 2.5 Flash. |
 | `MINIMAX_API_KEY` | MiniMax platform or Coding Plan key. Enables MiniMax M3 and MiniMax M2.7 through `https://api.minimax.io/v1`. |
 | `OPENCODE_API_KEY` | OpenCode Go subscription key. Enables DeepSeek V4 Pro, GLM-5.3, Kimi K2.6, and Qwen3.7 Plus through `https://opencode.ai/zen/go/v1`. |
-| `TYPESAFE_API_KEY` | Enables the "Judge with Jev" switch. Without it the switch is disabled with a tooltip. |
+| `TYPESAFE_API_KEY` | Enables the "Judge with Jev" switch and Library category suggestions. Manual saving and categorization work without it. |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Optional shared store for the per-IP rate limit (`KV_REST_API_URL` / `KV_REST_API_TOKEN` from Vercel KV are accepted too). Without them the limit lives in process memory, per instance. |
 | `ARC_MOCK_PROVIDERS` | Test-only. `1` serves canned completions and judge answers. Ignored when `VERCEL_ENV=production`. |
 
@@ -76,6 +82,10 @@ When `judge` is true the route makes one request to `POST https://api.typesafe.a
 
 `{ models: [{ id, label, provider }], judgeAvailable: boolean }`, filtered to providers whose key is present.
 
+### `POST /api/prompts/categorize`
+
+Body: `{ "prompt": string }`, non-empty and at most 48,000 characters. Uses TypeSafe's `jev-latest` with a Choice question and returns `{ category, confidence, model }`. Invalid bodies return 400, missing `TYPESAFE_API_KEY` returns 503, and upstream errors return 502. Suggestions have a separate per-IP limit of 10 requests per 10 minutes (429 with `Retry-After`); they do not consume the optimization limit. This endpoint classifies without storing the prompt or running an optimization. `ARC_MOCK_PROVIDERS=1` returns a test-only Writing category outside Vercel production.
+
 ## Core logic
 
 The web app's `buildPatternCandidates` uses the core's `generateCandidates` to render every catalog pattern with the supplied prompt. Patterns with extra variables use generic defaults for roles, audiences, scope, and output structure; the few-shot variant includes two instruction-following examples. The Examples tab demonstrates task-specific values for every pattern.
@@ -88,7 +98,7 @@ The web app's `buildPatternCandidates` uses the core's `generateCandidates` to r
 
 ## Privacy
 
-Prompts and model outputs stay in memory for the duration of a request. The server never logs, stores, or forwards them except to the provider you selected and, when enabled, to TypeSafe for judging. There is no analytics on prompt content. The browser keeps an active run, its progress, and its results across navigation between Optimize and Patterns. Cancel stops the active run; refreshing or closing the browser tab ends an in-flight request. The browser keeps the last prompt and completed result in `sessionStorage` so a refresh does not lose them; closing the tab clears it.
+Prompts and model outputs stay in memory for the duration of a request. The server never logs, stores, or forwards them except to the provider you selected and, when requested, to TypeSafe for judging or category suggestions. There is no analytics on prompt content. The browser keeps an active run, its progress, and its results across navigation between tabs. Cancel stops the active run; refreshing or closing the browser tab ends an in-flight request. The browser keeps the last prompt and completed result in `sessionStorage` so a refresh does not lose them; closing the tab clears it. Explicitly saved Library prompts are stored separately in `localStorage` until deleted or browser site data is cleared. Exported backups contain the saved prompt text, titles, categories, and category suggestion metadata.
 
 ## Scores
 

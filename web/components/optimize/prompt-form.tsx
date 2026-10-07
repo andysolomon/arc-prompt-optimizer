@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { SavePromptButton } from "@/components/library/prompt-editor-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -45,9 +46,12 @@ export function PromptForm({
       }}
     >
       <div className="px-4 pt-4">
-        <label htmlFor="prompt" className="mb-2 block text-sm font-medium">
-          Prompt
-        </label>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <label htmlFor="prompt" className="block text-sm font-medium">
+            Prompt
+          </label>
+          <SavePromptButton prompt={prompt} />
+        </div>
         <Textarea
           id="prompt"
           value={prompt}

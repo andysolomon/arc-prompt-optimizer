@@ -57,7 +57,7 @@ test("paste prompt → confirm → result renders with the rewrite and every cat
   await page.getByRole("button", { name: "Edit" }).click();
   const editor = page.getByLabel("Edit candidate prompt");
   await editor.fill(`${PROMPT}\nAdd a one-line risk summary.`);
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("edited").first()).toBeVisible();
 
   // Refresh keeps the result.
@@ -96,6 +96,8 @@ test("examples cover every pattern and load into Optimize without submitting", a
   await expect(page.getByRole("textbox", { name: "Prompt" })).toHaveValue(example.prompt);
   await expect(page.getByRole("button", { name: "Optimize", exact: true })).toBeEnabled();
   expect(optimizationRequests).toBe(0);
+  // Wait for the example query to be consumed before a reload can reapply it.
+  await expect(page).toHaveURL(/\/$/);
   await page.getByRole("textbox", { name: "Prompt" }).fill("My edited example");
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Prompt" })).toHaveValue("My edited example");
