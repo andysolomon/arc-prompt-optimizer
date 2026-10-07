@@ -11,7 +11,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Arc Prompt Optimizer",
   description:
-    "Paste a prompt. The optimizer renders three pattern variants, runs the baseline and each variant with the model you pick, scores the outputs, and ranks them.",
+    "Paste a prompt. The optimizer renders all nine pattern variants, runs the baseline and each candidate with the model you pick, scores the outputs, and ranks them.",
 };
 
 export const viewport: Viewport = {

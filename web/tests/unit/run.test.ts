@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REWRITE_PROTOCOL } from "@/lib/arc-core/core/index.js";
+import { REWRITE_PROTOCOL, listPatterns } from "@/lib/arc-core/core/index.js";
 import type { CompletionAdapter, CompletionRequest, CompletionResult } from "@/lib/arc-core/core/index.js";
 import { COMPLETION_TIMEOUT_MS, SLOW_COMPLETION_TIMEOUT_MS, completionTimeoutMs, runOptimization } from "@/lib/optimize-run";
 import { questionKey } from "@/lib/jev";
@@ -14,17 +14,18 @@ class ScriptedAdapter implements CompletionAdapter {
 }
 
 describe("runOptimization", () => {
-  it("emits render, four run steps, and rank, then returns four ranked candidates", async () => {
+  it("emits render, ten run steps, and rank, then returns all catalog patterns", async () => {
     const steps: StepEvent[] = [];
     const result = await runOptimization(
       { prompt: "Summarize this.", model: "openai/gpt-5-mini", judge: false, rewrite: false },
       { env: {}, signal: new AbortController().signal, emit: (event) => steps.push(event), adapter: new ScriptedAdapter() },
     );
-    expect(steps.map((s) => s.step.split(":")[0])).toEqual(["render", "run", "run", "run", "run", "rank"]);
-    expect(steps[0]!.candidateIds).toHaveLength(4);
-    expect(result.candidates).toHaveLength(4);
-    expect(result.ranking).toHaveLength(4);
-    expect(result.completionsUsed).toBe(4);
+    expect(steps.map((s) => s.step.split(":")[0])).toEqual(["render", ...Array(10).fill("run"), "rank"]);
+    expect(steps[0]!.candidateIds).toHaveLength(10);
+    expect(result.candidates).toHaveLength(10);
+    expect(result.candidates.slice(1).map((candidate) => candidate.prompt.pattern)).toEqual(listPatterns().map((pattern) => pattern.name));
+    expect(result.ranking).toHaveLength(10);
+    expect(result.completionsUsed).toBe(10);
     expect(result.judge).toEqual({ status: "not_requested" });
     // Deterministic preview checks tie at 1.00 and are broken by total tokens: the baseline ran first with the fewest tokens.
     expect(result.ranking[0]!.candidateId).toBe(result.baselineCandidateId);
@@ -37,7 +38,7 @@ describe("runOptimization", () => {
     const legend = { "0": "a", "1": "b", "2": "c", "3": "d" };
     const fakeFetch = (async () => {
       const answers = Object.fromEntries(
-        [0, 1, 2, 3].map((index) => [questionKey(index), { type: "score", score: index, confidence: 0.5, probabilities: { [String(index)]: 1 }, legend }]),
+        Array.from({ length: 10 }, (_, index) => index).map((index) => [questionKey(index), { type: "score", score: index / 3, confidence: 0.5, probabilities: { [String(Math.round(index / 3))]: 1 }, legend }]),
       );
       return new Response(JSON.stringify({ model: "jev-test", answers }), { status: 200 });
     }) as typeof fetch;
@@ -47,13 +48,13 @@ describe("runOptimization", () => {
     );
     expect(steps.map((s) => s.step)).toContain("judge");
     expect(result.judge.status).toBe("judged");
-    // Candidate 3 scored 3/3 → judge 1.0, combined (1 + 1) / 2 = 1; candidate 0 scored 0 → combined 0.5.
-    const last = result.candidates[3]!.id;
+    // Candidate 9 scored 3/3 → judge 1.0, combined (1 + 1) / 2 = 1; candidate 0 scored 0 → combined 0.5.
+    const last = result.candidates[9]!.id;
     expect(result.ranking[0]!.candidateId).toBe(last);
     expect(result.ranking[0]!.quality.combined).toEqual({ status: "measured", value: 1 });
-    expect(result.ranking[3]!.candidateId).toBe(result.baselineCandidateId);
-    expect(result.ranking[3]!.quality.combined).toEqual({ status: "measured", value: 0.5 });
-    expect(result.evaluations[3]!.cases[0]!.judge).toMatchObject({ status: "judged", score: 1 });
+    expect(result.ranking[9]!.candidateId).toBe(result.baselineCandidateId);
+    expect(result.ranking[9]!.quality.combined).toEqual({ status: "measured", value: 0.5 });
+    expect(result.evaluations[9]!.cases[0]!.judge).toMatchObject({ status: "judged", score: 1 });
   });
 
   it("falls back to the deterministic ranking when TypeSafe fails", async () => {
@@ -79,22 +80,22 @@ describe("runOptimization", () => {
     expect(result.judge).toEqual({ status: "failed", reason: "TYPESAFE_API_KEY is not configured." });
   });
 
-  it("rewrites the prompt first and ranks the rewrite as a fifth candidate", async () => {
+  it("rewrites the prompt first and ranks the rewrite as an eleventh candidate", async () => {
     const steps: StepEvent[] = [];
     const adapter = new RewritingAdapter();
     const result = await runOptimization(
       { prompt: "Summarize this.", model: "minimax/MiniMax-M3", judge: false, rewrite: true },
       { env: {}, signal: new AbortController().signal, emit: (event) => steps.push(event), adapter },
     );
-    expect(steps.map((s) => s.step.split(":")[0])).toEqual(["rewrite", "render", "run", "run", "run", "run", "run", "rank"]);
+    expect(steps.map((s) => s.step.split(":")[0])).toEqual(["rewrite", "render", ...Array(11).fill("run"), "rank"]);
     expect(steps[0]).toEqual({ step: "rewrite", status: "rewritten" });
-    expect(steps[1]!.candidateLabels).toEqual(["Baseline", "Rewrite", "Critique", "Decomposition", "Structured reasoning"]);
-    expect(result.candidates).toHaveLength(5);
+    expect(steps[1]!.candidateLabels).toEqual(["Baseline", "Rewrite", "Persona", "Few-shot", "Structured reasoning", "Template fill", "Critique", "Guardrail", "Decomposition", "Audience adaptation", "Boundary"]);
+    expect(result.candidates).toHaveLength(11);
     expect(result.candidates[1]!.prompt.text).toBe("You are an analyst.\nSummarize this in 3 bullets.");
     expect(result.candidates[1]!.parentCandidateId).toBe(result.baselineCandidateId);
-    expect(result.ranking).toHaveLength(5);
-    expect(result.completionsUsed).toBe(6);
-    expect(adapter.prompts).toHaveLength(6);
+    expect(result.ranking).toHaveLength(11);
+    expect(result.completionsUsed).toBe(12);
+    expect(adapter.prompts).toHaveLength(12);
     expect(adapter.prompts[2]).toBe("You are an analyst.\nSummarize this in 3 bullets.");
     expect(result.rewrite).toMatchObject({
       status: "rewritten",
@@ -104,17 +105,17 @@ describe("runOptimization", () => {
     });
   });
 
-  it("continues with the four preview candidates when the rewrite reply cannot be parsed", async () => {
+  it("continues with the baseline and all pattern candidates when the rewrite reply cannot be parsed", async () => {
     const steps: StepEvent[] = [];
     const result = await runOptimization(
       { prompt: "Summarize this.", model: "minimax/MiniMax-M3", judge: false, rewrite: true },
       { env: {}, signal: new AbortController().signal, emit: (event) => steps.push(event), adapter: new ScriptedAdapter() },
     );
     expect(steps[0]).toEqual({ step: "rewrite", status: "failed" });
-    expect(steps[1]!.candidateIds).toHaveLength(4);
-    expect(result.candidates).toHaveLength(4);
+    expect(steps[1]!.candidateIds).toHaveLength(10);
+    expect(result.candidates).toHaveLength(10);
     expect(result.rewrite.status).toBe("failed");
-    expect(result.completionsUsed).toBe(5);
+    expect(result.completionsUsed).toBe(11);
   });
 
   it("stops the run when it is cancelled during the rewrite", async () => {
@@ -143,7 +144,7 @@ describe("runOptimization", () => {
       { prompt: "Summarize this.", model: "minimax/MiniMax-M3", judge: true, rewrite: true },
       { env: { TYPESAFE_API_KEY: "k" }, signal: new AbortController().signal, emit: () => {}, adapter: new RewritingAdapter(), fetch: fakeFetch },
     );
-    expect(questions).toBe(5);
+    expect(questions).toBe(11);
     expect(result.judge.status).toBe("judged");
   });
 });
@@ -171,7 +172,7 @@ describe("concurrent candidate runs", () => {
       { prompt: "Summarize this.", model: "openai/gpt-5-mini", judge: false, rewrite: false },
       { env: {}, signal: new AbortController().signal, emit: () => {}, adapter },
     );
-    expect(peak).toBe(4);
+    expect(peak).toBe(10);
   });
 
   it("names the failing candidate and aborts the others", async () => {
@@ -192,7 +193,7 @@ describe("concurrent candidate runs", () => {
       { env: {}, signal: new AbortController().signal, emit: () => {}, adapter },
     );
     await expect(run).rejects.toThrow("The critique candidate failed: provider overloaded");
-    expect(aborted).toHaveLength(3);
+    expect(aborted).toHaveLength(9);
   });
 });
 

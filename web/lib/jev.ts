@@ -31,7 +31,7 @@ export function questionKey(index: number): string {
 
 /**
  * One request for every candidate. `state` carries all prompt/output pairs keyed by question key, and each
- * Score question points at its own pair so a single call judges all four outputs.
+ * Score question points at its own pair so a single call judges every output.
  */
 export function buildJevRequest(entries: readonly JevEntry[]): Record<string, unknown> {
   const state: Record<string, { prompt: string; output: string }> = {};

@@ -98,10 +98,10 @@ test("tab navigation retains the request, receives progress, and keeps results c
   await expect(page.getByRole("heading", { name: "Pattern catalog" })).toBeVisible();
   await page.evaluate(() => window.optimizationStream.finish());
   // Persistence confirms the result was consumed while Optimize was unmounted.
-  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("arc-po-session") ?? "{}").result?.completionsUsed)).toBe(6);
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("arc-po-session") ?? "{}").result?.completionsUsed)).toBe(12);
   await page.getByRole("link", { name: "Optimize", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Best candidate" })).toBeVisible();
-  await expect(page.getByText("6 completions · Claude Sonnet 4.5")).toBeVisible();
+  await expect(page.getByText("12 completions · Claude Sonnet 4.5")).toBeVisible();
   expect(await page.evaluate(() => window.optimizationStream.requests)).toBe(1);
 });
 
@@ -122,4 +122,30 @@ test("Cancel still aborts after switching tabs and a new run can finish", async 
   await page.evaluate(() => window.optimizationStream.finish());
   await expect(page.getByRole("heading", { name: "Best candidate" })).toBeVisible();
   expect(await page.evaluate(() => window.optimizationStream.requests)).toBe(2);
+});
+
+test("loading an example preserves an active run and replaces the prompt after it finishes", async ({ page }) => {
+  await controlStream(page);
+  await page.goto("/");
+  await startRun(page);
+  await page.getByRole("link", { name: "Examples", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Example prompts" })).toBeVisible();
+  const examplePrompt = await page.locator("article#few_shot pre").textContent();
+  await page.getByRole("link", { name: "Use Few-Shot Pattern example", exact: true }).click();
+
+  await expect(page.getByRole("region", { name: "Progress" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Prompt" })).toHaveValue(PROMPT);
+  await expect(page.getByText("Finish or cancel the current optimization before loading an example.").first()).toBeVisible();
+  expect(await page.evaluate(() => window.optimizationStream.aborted)).toBe(0);
+  expect(await page.evaluate(() => window.optimizationStream.requests)).toBe(1);
+
+  await page.evaluate(() => window.optimizationStream.finish());
+  await expect(page.getByRole("heading", { name: "Best candidate" })).toBeVisible();
+  await page.getByRole("link", { name: "Examples", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Example prompts" })).toBeVisible();
+  await page.getByRole("link", { name: "Use Few-Shot Pattern example", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Prompt" })).toHaveValue(examplePrompt!);
+  await expect(page.getByRole("region", { name: "Result" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Optimize", exact: true })).toBeEnabled();
+  expect(await page.evaluate(() => window.optimizationStream.requests)).toBe(1);
 });

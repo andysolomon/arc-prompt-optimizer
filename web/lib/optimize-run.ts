@@ -3,7 +3,6 @@ import {
   DEFAULT_RANKING_OBJECTIVE,
   PREVIEW_SUITE,
   aggregateCases,
-  buildPreviewCandidates,
   evaluateCandidate,
   rankCandidates,
   rewritePrompt,
@@ -20,6 +19,7 @@ import type {
 import { AiSdkCompletionAdapter, MockCompletionAdapter } from "@/lib/adapter";
 import { mockProvidersEnabled, type ServerEnv } from "@/lib/env";
 import { candidateLabel } from "@/lib/format";
+import { buildPatternCandidates } from "@/lib/pattern-candidates";
 import { getModel } from "@/lib/models";
 import { judgeWithJev, type JevEntry } from "@/lib/jev";
 import {
@@ -160,18 +160,18 @@ function mockJudge(entries: readonly JevEntry[]): JudgeReport {
 }
 
 /**
- * (rewrite) → render → run ×4–5 concurrently → (judge) → rank. Emits one step event as each step completes. Prompts and
+ * (rewrite) → render → run every candidate concurrently → (judge) → rank. Emits one step event as each step completes. Prompts and
  * outputs are held in memory for the duration of the request only and are never logged or persisted.
  */
 export async function runOptimization(request: OptimizeRequest, options: RunOptions): Promise<OptimizeResult> {
   const modelAdapter = selectAdapter(request, options);
-  const preview = buildPreviewCandidates(request.prompt);
+  const preview = buildPatternCandidates(request.prompt);
 
   let rewrite: RewriteReport = { status: "not_requested" };
   let rewriteCompletions = 0;
   let candidates: readonly PromptCandidate[] = preview;
   if (request.rewrite) {
-    // Cancellation propagates from rewritePrompt and stops the run; other failures leave the four preview candidates.
+    // Cancellation propagates from rewritePrompt and stops the run; other failures leave the baseline and all patterns.
     const outcome = await rewritePrompt(modelAdapter, request.prompt, {
       model: request.model,
       timeoutMs: REWRITE_TIMEOUT_MS,

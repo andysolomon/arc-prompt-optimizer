@@ -121,6 +121,18 @@ function useSessionState() {
     setPhase(result ? "done" : "idle");
   }, [result]);
 
+  const loadExample = useCallback((text: string) => {
+    if (controllerRef.current !== null) {
+      toast.warning("Finish or cancel the current optimization before loading an example.");
+      return;
+    }
+    setPrompt(text);
+    setResult(null);
+    setSelectedId(null);
+    setEdited({});
+    setPhase("idle");
+  }, []);
+
   const startRun = useCallback(async () => {
     if (controllerRef.current !== null) return;
     const controller = new AbortController();
@@ -143,7 +155,7 @@ function useSessionState() {
       setResult(next);
       setSelectedId(defaultSelectionId(next));
       setPhase("done");
-      if (next.rewrite.status === "failed") toast.warning("The rewrite failed; ranking the other four candidates.");
+      if (next.rewrite.status === "failed") toast.warning(`The rewrite failed; ranking the remaining ${next.candidates.length} candidates.`);
       if (judgeForRun && next.judge.status === "failed") toast.warning("Jev judging failed; showing the deterministic ranking.");
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -155,6 +167,8 @@ function useSessionState() {
   }, [effectiveJudge, model, prompt]);
 
   return {
+    hydrated,
+    loadExample,
     prompt,
     setPrompt,
     model,

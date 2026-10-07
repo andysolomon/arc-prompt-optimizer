@@ -13,8 +13,8 @@ export default function PatternsPage() {
       <div className="flex flex-col gap-2">
         <h1 className="m-0 text-3xl font-semibold leading-tight tracking-[-0.025em]">Pattern catalog</h1>
         <p className="m-0 text-[15px] leading-relaxed text-muted-foreground text-pretty">
-          Nine strict templates. Variable values are escaped before substitution, so a value cannot close a tag or quote delimiter. The preview
-          run uses Critique, Decomposition, and Structured Reasoning.
+          Nine strict templates, all included in every optimization run. Variable values are escaped before substitution, so a value cannot
+          close a tag or quote delimiter. Browse the Examples tab for a complete prompt using each pattern.
         </p>
       </div>
       <div className="flex flex-col gap-3">
