@@ -4,6 +4,7 @@ import { ChevronDown, Copy } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { JevSparkline } from "@/components/optimize/sparkline";
+import { SavePromptButton } from "@/components/library/prompt-editor-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -166,6 +167,7 @@ export function ResultPanel({
                 <Copy className="size-3.5" aria-hidden="true" />
                 Copy
               </Button>
+              <SavePromptButton prompt={best.text} />
               <Button
                 type="button"
                 size="sm"
