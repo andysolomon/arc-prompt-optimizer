@@ -84,7 +84,7 @@ The web app reuses the repository's core instead of reimplementing it: `buildPre
 
 ## Privacy
 
-Prompts and model outputs stay in memory for the duration of a request. The server never logs, stores, or forwards them except to the provider you selected and, when enabled, to TypeSafe for judging. There is no analytics on prompt content. The browser keeps the last prompt and result in `sessionStorage` so a refresh does not lose them; closing the tab clears it.
+Prompts and model outputs stay in memory for the duration of a request. The server never logs, stores, or forwards them except to the provider you selected and, when enabled, to TypeSafe for judging. There is no analytics on prompt content. The browser keeps an active run, its progress, and its results across navigation between Optimize and Patterns. Cancel stops the active run; refreshing or closing the browser tab ends an in-flight request. The browser keeps the last prompt and completed result in `sessionStorage` so a refresh does not lose them; closing the tab clears it.
 
 ## Scores
 
