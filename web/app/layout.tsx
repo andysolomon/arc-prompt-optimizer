@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
+import { OptimizeSessionProvider } from "@/components/optimize/optimize-session-provider";
 import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
@@ -24,9 +25,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className="flex min-h-screen flex-col font-sans">
         <ThemeProvider>
           <TooltipProvider delayDuration={200}>
-            <SiteHeader />
-            {children}
-            <Toaster position="bottom-center" />
+            <OptimizeSessionProvider>
+              <SiteHeader />
+              {children}
+              <Toaster position="bottom-center" />
+            </OptimizeSessionProvider>
           </TooltipProvider>
         </ThemeProvider>
       </body>

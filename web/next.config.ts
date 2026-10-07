@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  allowedDevOrigins: ["**.ts.net"],
   // The app is self-contained; do not trace files from the parent repository.
   outputFileTracingRoot: fileURLToPath(new URL("./", import.meta.url)),
   experimental: {

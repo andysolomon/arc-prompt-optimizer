@@ -15,7 +15,7 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     // Providers are mocked at the adapter boundary; no key or network access is needed.
-    command: `pnpm exec next dev --port ${PORT}`,
+    command: `pnpm exec next dev --hostname 127.0.0.1 --port ${PORT}`,
     url: `http://127.0.0.1:${PORT}/api/models`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
