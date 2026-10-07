@@ -8,13 +8,14 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/", label: "Optimize" },
   { href: "/patterns", label: "Patterns" },
+  { href: "/examples", label: "Examples" },
 ] as const;
 
 export function SiteHeader() {
   const pathname = usePathname();
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-background">
-      <div className="mx-auto flex h-14 max-w-[1040px] flex-wrap items-center gap-x-6 gap-y-2 px-4 sm:px-6">
+      <div className="mx-auto flex min-h-14 max-w-[1040px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2 sm:px-6">
         <Link href="/" className="flex items-center gap-2.5 text-[15px] font-semibold tracking-[-0.01em]" aria-label="Arc Prompt Optimizer home">
           <span aria-hidden="true" className="flex size-[22px] items-center justify-center rounded-md bg-primary">
             <span className="block size-2 rotate-45 rounded-[2px] bg-primary-foreground" />

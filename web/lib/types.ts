@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OPTIMIZE_PATTERNS } from "@/lib/pattern-candidates";
 import type {
   CandidateEvaluation,
   PromptCandidate,
@@ -33,14 +34,14 @@ export type ModelId = (typeof MODEL_IDS)[number];
 
 export const MAX_PROMPT_CHARACTERS = 16_384;
 
-/** One completion per candidate (baseline plus three variants), plus the rewrite and its run when requested. */
+/** One completion per candidate, plus the rewrite generation when requested. */
 export function completionCount(rewrite: boolean): number {
-  return rewrite ? 6 : 4;
+  return candidateCount(rewrite) + (rewrite ? 1 : 0);
 }
 
-/** Candidates ranked in a run: baseline, three pattern variants, and the rewrite when requested. */
+/** Baseline, every catalog pattern, and the rewrite when requested. */
 export function candidateCount(rewrite: boolean): number {
-  return rewrite ? 5 : 4;
+  return 1 + OPTIMIZE_PATTERNS.length + (rewrite ? 1 : 0);
 }
 
 export const optimizeRequestSchema = z.object({

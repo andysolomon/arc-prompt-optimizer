@@ -19,6 +19,13 @@ const LABELS: Readonly<Record<string, string>> = {
   critique: "Critique",
   decomposition: "Decomposition",
   structured_reasoning: "Structured reasoning",
+  chain_of_thought: "Structured reasoning",
+  persona: "Persona",
+  few_shot: "Few-shot",
+  template_fill: "Template fill",
+  guardrail: "Guardrail",
+  audience_adapt: "Audience adaptation",
+  boundary: "Boundary",
 };
 
 /** Human label for a candidate from its metadata label (or pattern name as a fallback). */

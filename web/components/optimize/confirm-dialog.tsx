@@ -3,11 +3,12 @@
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { candidateCount, completionCount } from "@/lib/types";
+import { OPTIMIZE_PATTERNS } from "@/lib/pattern-candidates";
 
 export function confirmBody(rewrite: boolean): string {
   return rewrite
-    ? "Nothing calls a model until you confirm. The model first rewrites your prompt, then the run produces one completion per candidate: the source baseline, the rewrite, and three pattern variants. Nothing is submitted on your behalf, and the result is returned to you only."
-    : "Nothing calls a model until you confirm. The run produces one completion per candidate: the source baseline plus three pattern variants. Nothing is submitted on your behalf, and the result is returned to you only.";
+    ? `Nothing calls a model until you confirm. The model first rewrites your prompt, then the run produces one completion per candidate: the source baseline, the rewrite, and all ${OPTIMIZE_PATTERNS.length} pattern variants. Nothing is submitted on your behalf, and the result is returned to you only.`
+    : `Nothing calls a model until you confirm. The run produces one completion per candidate: the source baseline plus all ${OPTIMIZE_PATTERNS.length} pattern variants. Nothing is submitted on your behalf, and the result is returned to you only.`;
 }
 
 export function ConfirmDialog({

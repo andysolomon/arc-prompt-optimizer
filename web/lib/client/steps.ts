@@ -1,4 +1,6 @@
 import { candidateCount, type StepEvent } from "@/lib/types";
+import { candidateLabel } from "@/lib/format";
+import { OPTIMIZE_PATTERNS } from "@/lib/pattern-candidates";
 
 export interface StepItem {
   readonly key: string;
@@ -14,10 +16,10 @@ const PLANNED_RUN = "planned-run:";
 
 /**
  * Steps shown before the server reports anything. Run steps are placeholders until the `render` event names
- * the actual candidates, so a failed rewrite (four candidates instead of five) never leaves the list misaligned.
+ * the actual candidates, so a failed rewrite never leaves the list misaligned.
  */
 export function planSteps(judge: boolean, rewrite: boolean): StepState {
-  const runs = ["baseline", ...(rewrite ? ["rewrite"] : []), "critique", "decomposition", "structured reasoning"];
+  const runs = ["baseline", ...(rewrite ? ["rewrite"] : []), ...OPTIMIZE_PATTERNS.map((pattern) => candidateLabel(undefined, pattern.name).toLowerCase())];
   return {
     steps: [
       ...(rewrite ? [{ key: "rewrite", label: "Rewrite the prompt" }] : []),

@@ -16,19 +16,25 @@ describe("parseSseChunk", () => {
 });
 
 describe("steps", () => {
-  it("plans nine steps with the rewrite and judge, six without either", () => {
+  it("plans all pattern steps with or without the rewrite and judge", () => {
     expect(planSteps(true, true).steps.map((s) => s.label)).toEqual([
       "Rewrite the prompt",
-      "Render 5 candidates",
+      "Render 11 candidates",
       "Run baseline",
       "Run rewrite",
-      "Run critique",
-      "Run decomposition",
+      "Run persona",
+      "Run few-shot",
       "Run structured reasoning",
+      "Run template fill",
+      "Run critique",
+      "Run guardrail",
+      "Run decomposition",
+      "Run audience adaptation",
+      "Run boundary",
       "Score outputs with Jev",
       "Rank candidates",
     ]);
-    expect(planSteps(false, false).steps).toHaveLength(6);
+    expect(planSteps(false, false).steps).toHaveLength(12);
   });
 
   it("replaces planned run steps with the rendered candidates and marks steps done by key", () => {
