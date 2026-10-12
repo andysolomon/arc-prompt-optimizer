@@ -17,6 +17,9 @@ const SERVER_ENV = {
   GOOGLE_GENERATIVE_AI_API_KEY: "",
   TYPESAFE_API_KEY: "",
   NEXT_TELEMETRY_DISABLED: "1",
+  // Blank out any Clerk keys from .env.local: the default server runs without accounts; the second one sets its own.
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
+  CLERK_SECRET_KEY: "",
   NEXT_PUBLIC_CLERK_KEYLESS_DISABLED: "1",
   CLERK_TELEMETRY_DISABLED: "1",
 };
