@@ -10,15 +10,64 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
 import { lineDiffSummary } from "@/lib/diff";
-import { candidateLabel, formatCharacterCount, formatCost, formatLatency, formatScore, formatTokens } from "@/lib/format";
+import { candidateLabel, checkLabel, formatCharacterCount, formatCost, formatLatency, formatScore, formatTokens } from "@/lib/format";
 import { modelLabel } from "@/lib/models";
-import type { JevAnswer, OptimizeResult, RankedCandidate } from "@/lib/types";
+import type { JevAnswer, OptimizeResult, PlanReport, RankedCandidate, RevisionReport } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export const CAVEAT_JUDGED =
-  "Deterministic checks use the preview suite, which only verifies that each output is non-empty, so every candidate passes 1/1. The Jev score is a Score question over four levels, normalized and averaged with the deterministic score. Confidence reflects how spread the probability is across levels, not whether the answer is correct. Supply an evaluation suite for a meaningful comparison.";
+  "The Jev score is a Score question over four levels, normalized and averaged with the deterministic score. Confidence reflects how spread the probability is across levels, not whether the answer is correct.";
 export const CAVEAT_DETERMINISTIC =
-  "Scores come from deterministic checks only. Without an evaluation suite, the preview suite only checks that outputs are non-empty, so ties are expected and are broken by total tokens, then latency. When the rewrite ties for first, it is shown first. Enable the Jev judge or supply a suite for a meaningful comparison.";
+  "Scores come from deterministic checks only. Ties are broken by total tokens, then latency, which say nothing about prompt quality, so a tied rewrite or revision is shown first. Enable the Jev judge for a semantic comparison.";
+export const CAVEAT_PLANNED =
+  "The checks were planned by the same model that wrote the rewrite, so they favor what it set out to do. Every candidate's output is scored against the same checks; the quality score is the fraction passed.";
+export const CAVEAT_DEFAULT =
+  "No task checks were planned for this run, so the only check is that each output is non-empty and every candidate passes it.";
+
+const TASK_TYPE_LABELS: Readonly<Record<string, string>> = {
+  data_extraction: "data extraction",
+  classification: "classification",
+  summarization: "summarization",
+  code_generation: "code generation",
+  creative_writing: "creative writing",
+  multi_step_reasoning: "multi-step reasoning",
+  question_answering: "question answering",
+  content_moderation: "content moderation",
+  translation_adaptation: "translation or adaptation",
+  analysis_review: "analysis or review",
+  other: "general",
+};
+
+export function describeCriteria(plan: Extract<PlanReport, { status: "planned" }>): string[] {
+  const items: string[] = [];
+  if (plan.criteria.expectedFormat !== undefined) items.push(`${plan.criteria.expectedFormat.replace(/_/gu, " ")} format`);
+  if (plan.criteria.maxWords !== undefined) items.push(`at most ${plan.criteria.maxWords} words`);
+  if (plan.criteria.minWords !== undefined) items.push(`at least ${plan.criteria.minWords} words`);
+  for (const keyword of plan.criteria.requiredKeywords) items.push(`mentions "${keyword}"`);
+  for (const phrase of plan.criteria.forbiddenPhrases) items.push(`never says "${phrase}"`);
+  return items;
+}
+
+export function loopSummary(result: OptimizeResult): string {
+  const revised = result.revisions.filter((revision) => revision.status === "revised").length;
+  const rounds = revised === 0 ? "" : `${revised} revision ${revised === 1 ? "round" : "rounds"} ran. `;
+  switch (result.loop.stoppedBecause) {
+    case "all_checks_passed":
+      return `${rounds}${revised === 0 ? "The rewrite passed every check on its first run, so no revision was needed." : "The last revision passed every check."}`;
+    case "max_rounds":
+      return `${rounds}The revision limit was reached with checks still failing; the best-scoring candidate is shown.`;
+    case "time_budget":
+      return `${rounds}Another round did not fit in the run's time budget, so revising stopped.`;
+    case "revision_failed":
+      return `${rounds}The model's revision reply could not be used, so revising stopped.`;
+    case "no_criteria":
+      return "No objective checks were planned, so there was nothing to revise against.";
+    case "rewrite_failed":
+      return "The rewrite failed, so there was nothing to revise.";
+    case "not_requested":
+      return "";
+  }
+}
 
 export interface RowView {
   readonly ranked: RankedCandidate;
@@ -28,9 +77,38 @@ export interface RowView {
   readonly edited: boolean;
   readonly added: number;
   readonly removed: number;
+  /** "3/4 checks" over the deterministic checks of the candidate's case. */
   readonly passedText: string;
   readonly allPassed: boolean;
+  /** Labels of the checks the output failed. */
+  readonly failed: readonly string[];
   readonly jev: JevAnswer | undefined;
+  /** The rewrite or revision report that explains this candidate, when it is one. */
+  readonly reasons: { readonly title: string; readonly analysisTitle: string; readonly analysis: readonly string[]; readonly changes: readonly string[] } | undefined;
+}
+
+function reasonsFor(result: OptimizeResult, candidateId: string): RowView["reasons"] {
+  if (result.rewrite.status === "rewritten" && result.rewrite.candidateId === candidateId) {
+    return { title: "Why it was rewritten", analysisTitle: "Weaknesses in the original", analysis: result.rewrite.analysis, changes: result.rewrite.changes };
+  }
+  const revision = result.revisions.find((entry): entry is Extract<RevisionReport, { status: "revised" }> => entry.status === "revised" && entry.candidateId === candidateId);
+  if (revision !== undefined) {
+    return {
+      title: `Why it was revised (round ${revision.round})`,
+      analysisTitle: `Why the previous version failed ${revision.targeted.length === 1 ? "its check" : `${revision.targeted.length} checks`}`,
+      analysis: revision.analysis,
+      changes: revision.changes,
+    };
+  }
+  if (result.refine.status === "refined") {
+    for (const round of result.refine.rounds) {
+      const attempt = round.attempts.find((entry) => entry.status === "evaluated" && entry.candidateId === candidateId);
+      if (attempt !== undefined && attempt.status === "evaluated") {
+        return { title: `Why it was refined (round ${round.round})`, analysisTitle: "What the previous output got wrong", analysis: attempt.analysis, changes: attempt.changes };
+      }
+    }
+  }
+  return undefined;
 }
 
 export function buildRows(result: OptimizeResult, edited: Readonly<Record<string, string>>): RowView[] {
@@ -40,8 +118,8 @@ export function buildRows(result: OptimizeResult, edited: Readonly<Record<string
     const evaluation = result.evaluations.find((e) => e.candidateId === ranked.candidateId);
     const text = edited[ranked.candidateId] ?? candidate?.prompt.text ?? "";
     const diff = lineDiffSummary(original, text);
-    const caseCount = evaluation?.aggregate.caseCount ?? 0;
-    const passed = evaluation?.aggregate.passedCaseCount ?? 0;
+    const checks = evaluation?.cases.flatMap((entry) => entry.deterministic.checks) ?? [];
+    const passed = checks.filter((check) => check.passed).length;
     return {
       ranked,
       id: ranked.candidateId,
@@ -50,9 +128,11 @@ export function buildRows(result: OptimizeResult, edited: Readonly<Record<string
       edited: edited[ranked.candidateId] !== undefined,
       added: diff.added,
       removed: diff.removed,
-      passedText: `passed ${passed}/${caseCount}`,
-      allPassed: caseCount > 0 && passed === caseCount,
+      passedText: `${passed}/${checks.length} ${checks.length === 1 ? "check" : "checks"}`,
+      allPassed: checks.length > 0 && passed === checks.length,
+      failed: checks.filter((check) => !check.passed).map(checkLabel),
       jev: result.judge.status === "judged" ? result.judge.answers[ranked.candidateId] : undefined,
+      reasons: reasonsFor(result, ranked.candidateId),
     };
   });
 }
@@ -74,19 +154,16 @@ export function ResultPanel({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [showReasons, setShowReasons] = useState(false);
-  const [showRefineReasons, setShowRefineReasons] = useState(false);
   const rows = buildRows(result, edited);
   const best = rows.find((row) => row.id === selectedId) ?? rows[0];
   if (best === undefined) return null;
   const judgeUsed = result.judge.status === "judged";
-  const rewriteReport = result.rewrite.status === "rewritten" && result.rewrite.candidateId === best.id ? result.rewrite : undefined;
-  const hasReasons = rewriteReport !== undefined && (rewriteReport.analysis.length > 0 || rewriteReport.changes.length > 0);
+  const reasons = best.reasons;
+  const hasReasons = reasons !== undefined && (reasons.analysis.length > 0 || reasons.changes.length > 0);
+  const planned = result.plan.status === "planned" ? result.plan : undefined;
+  const criteria = planned === undefined ? [] : describeCriteria(planned);
+  const summary = loopSummary(result);
   const refineReport = result.refine.status === "refined" ? result.refine : undefined;
-  // The refine attempt that produced the selected candidate, with the diagnosis the model gave for the change.
-  const refineAttempt = refineReport?.rounds
-    .flatMap((round) => round.attempts.map((attempt) => ({ round: round.round, attempt })))
-    .find(({ attempt }) => attempt.status === "evaluated" && attempt.candidateId === best.id);
-  const refineNotes = refineAttempt !== undefined && refineAttempt.attempt.status === "evaluated" ? refineAttempt.attempt : undefined;
   const improvedRounds = refineReport?.rounds.filter((round) => round.improved).length ?? 0;
 
   const copy = async () => {
@@ -106,6 +183,16 @@ export function ResultPanel({
           {result.completionsUsed} completions · {modelLabel(result.model)}
         </span>
       </div>
+
+      {result.rewrite.status === "failed" ? (
+        <div role="alert" className="rounded-[10px] border border-destructive/40 bg-destructive/5 px-4 py-3 text-[13px] leading-relaxed">
+          <p className="m-0 font-medium">The model did not produce a usable rewrite after {result.rewrite.attempts} {result.rewrite.attempts === 1 ? "attempt" : "attempts"}.</p>
+          <p className="m-0 mt-1 text-muted-foreground">
+            Reason: {result.rewrite.reason}. The candidates below are your original prompt and {result.candidates.length - 1} pattern variants of it,
+            ranked by deterministic checks only. Try again, or pick a different model.
+          </p>
+        </div>
+      ) : null}
 
       <div className="flex flex-col rounded-[10px] border border-border bg-card shadow-[0_1px_2px_rgba(0,0,0,.04)]">
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3.5">
@@ -195,74 +282,36 @@ export function ResultPanel({
           </span>
         </div>
 
-        {refineNotes && refineAttempt ? (
-          <Collapsible open={showRefineReasons} onOpenChange={setShowRefineReasons} className="border-t border-border">
-            <CollapsibleTrigger asChild>
-              <button
-                type="button"
-                className="flex w-full items-center justify-between rounded-b-[10px] px-4 py-2.5 text-[13px] font-medium transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-              >
-                <span>
-                  Why it was refined (round {refineAttempt.round}, {refineNotes.changes.length} changes)
-                </span>
-                <ChevronDown aria-hidden="true" className={cn("size-4 transition-transform", showRefineReasons && "rotate-180")} />
-              </button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <div className="flex flex-col gap-3 px-4 pb-4 text-[13px] leading-relaxed">
-                {refineNotes.analysis.length > 0 ? (
-                  <div>
-                    <h3 className="m-0 mb-1 text-xs font-medium text-muted-foreground">What the previous output got wrong</h3>
-                    <ul className="m-0 list-disc space-y-0.5 pl-5">
-                      {refineNotes.analysis.map((item, index) => (
-                        <li key={index}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {refineNotes.changes.length > 0 ? (
-                  <div>
-                    <h3 className="m-0 mb-1 text-xs font-medium text-muted-foreground">Changes</h3>
-                    <ol className="m-0 list-decimal space-y-0.5 pl-5">
-                      {refineNotes.changes.map((item, index) => (
-                        <li key={index}>{item}</li>
-                      ))}
-                    </ol>
-                  </div>
-                ) : null}
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-        ) : null}
-
-        {hasReasons && rewriteReport ? (
+        {hasReasons && reasons ? (
           <Collapsible open={showReasons} onOpenChange={setShowReasons} className="border-t border-border">
             <CollapsibleTrigger asChild>
               <button
                 type="button"
                 className="flex w-full items-center justify-between rounded-b-[10px] px-4 py-2.5 text-[13px] font-medium transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               >
-                <span>Why it was rewritten ({rewriteReport.changes.length} changes)</span>
+                <span>
+                  {reasons.title} ({reasons.changes.length} {reasons.changes.length === 1 ? "change" : "changes"})
+                </span>
                 <ChevronDown aria-hidden="true" className={cn("size-4 transition-transform", showReasons && "rotate-180")} />
               </button>
             </CollapsibleTrigger>
             <CollapsibleContent>
               <div className="flex flex-col gap-3 px-4 pb-4 text-[13px] leading-relaxed">
-                {rewriteReport.analysis.length > 0 ? (
+                {reasons.analysis.length > 0 ? (
                   <div>
-                    <h3 className="m-0 mb-1 text-xs font-medium text-muted-foreground">Weaknesses in the original</h3>
+                    <h3 className="m-0 mb-1 text-xs font-medium text-muted-foreground">{reasons.analysisTitle}</h3>
                     <ul className="m-0 list-disc space-y-0.5 pl-5">
-                      {rewriteReport.analysis.map((item, index) => (
+                      {reasons.analysis.map((item, index) => (
                         <li key={index}>{item}</li>
                       ))}
                     </ul>
                   </div>
                 ) : null}
-                {rewriteReport.changes.length > 0 ? (
+                {reasons.changes.length > 0 ? (
                   <div>
                     <h3 className="m-0 mb-1 text-xs font-medium text-muted-foreground">Changes</h3>
                     <ol className="m-0 list-decimal space-y-0.5 pl-5">
-                      {rewriteReport.changes.map((item, index) => (
+                      {reasons.changes.map((item, index) => (
                         <li key={index}>{item}</li>
                       ))}
                     </ol>
@@ -273,6 +322,35 @@ export function ResultPanel({
           </Collapsible>
         ) : null}
       </div>
+
+      <section aria-label="Checks" data-testid="checks" className="flex flex-col gap-2 rounded-[10px] border border-border bg-card px-4 py-3.5 text-[13px] leading-relaxed">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="m-0 text-sm font-medium">How candidates were scored</h3>
+          {planned ? (
+            <span className="text-xs text-muted-foreground">
+              {TASK_TYPE_LABELS[planned.taskType] ?? planned.taskType} task
+              {planned.temperature === undefined ? "" : ` · suggested temperature ${planned.temperature}`}
+            </span>
+          ) : null}
+        </div>
+        {planned ? (
+          <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+            {criteria.map((item) => (
+              <li key={item} className="rounded-full border border-border px-2 py-0.5 text-xs">
+                {item}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="m-0 text-muted-foreground">
+            {CAVEAT_DEFAULT} {result.plan.status === "default" ? result.plan.reason : ""}
+          </p>
+        )}
+        <p className="m-0 text-xs text-muted-foreground">
+          {best.allPassed ? `The selected candidate passed ${best.passedText}.` : `The selected candidate passed ${best.passedText}; failed: ${best.failed.join(", ")}.`}
+          {summary ? ` ${summary}` : ""}
+        </p>
+      </section>
 
       <Collapsible open={expanded} onOpenChange={setExpanded} className="rounded-[10px] border border-border bg-card">
         <CollapsibleTrigger asChild>
@@ -311,7 +389,9 @@ export function ResultPanel({
                       <span>
                         quality <span className="text-foreground">{formatScore(row.ranked.quality.combined)}</span>
                       </span>
-                      <span className={row.allPassed ? "text-success" : "text-destructive"}>{row.passedText}</span>
+                      <span className={row.allPassed ? "text-success" : "text-destructive"} title={row.failed.length === 0 ? undefined : `Failed: ${row.failed.join(", ")}`}>
+                        {row.passedText}
+                      </span>
                       <span>
                         <span className="text-diff-add">+{row.added}</span> <span className="text-diff-del">−{row.removed}</span> lines
                       </span>
@@ -347,10 +427,15 @@ export function ResultPanel({
                 </div>
               );
             })}
-            <p className="m-0 px-4 py-3 text-xs leading-relaxed text-muted-foreground text-pretty">{judgeUsed ? CAVEAT_JUDGED : CAVEAT_DETERMINISTIC}</p>
-            {result.rewrite.status === "failed" ? (
+            <p className="m-0 px-4 py-3 text-xs leading-relaxed text-muted-foreground text-pretty">
+              {planned ? CAVEAT_PLANNED : CAVEAT_DEFAULT} {judgeUsed ? CAVEAT_JUDGED : CAVEAT_DETERMINISTIC}
+            </p>
+            {result.revisions.some((revision) => revision.status === "failed") ? (
               <p role="status" className="m-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
-                The rewrite failed, so it is not in this ranking. Reason: {result.rewrite.reason}
+                {result.revisions
+                  .filter((revision): revision is Extract<RevisionReport, { status: "failed" }> => revision.status === "failed")
+                  .map((revision) => `Revision round ${revision.round} failed after ${revision.attempts} ${revision.attempts === 1 ? "attempt" : "attempts"}: ${revision.reason}.`)
+                  .join(" ")}
               </p>
             ) : null}
             {result.judge.status === "failed" ? (

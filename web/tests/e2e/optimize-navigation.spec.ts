@@ -74,7 +74,7 @@ async function startRun(page: Page) {
   await page.getByRole("dialog").getByRole("button", { name: "Run", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.optimizationStream.ready)).toBe(true);
   await expect(page.getByRole("region", { name: "Progress" })).toBeVisible();
-  await expect(page.getByText("Rewrite the prompt (done)")).toBeVisible();
+  await expect(page.getByText("Rewrite the prompt and plan the checks (done)")).toBeVisible();
 }
 
 test("tab navigation retains the request, receives progress, and keeps results completed on Patterns", async ({ page }) => {
@@ -98,10 +98,10 @@ test("tab navigation retains the request, receives progress, and keeps results c
   await expect(page.getByRole("heading", { name: "Pattern catalog" })).toBeVisible();
   await page.evaluate(() => window.optimizationStream.finish());
   // Persistence confirms the result was consumed while Optimize was unmounted.
-  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("arc-po-session") ?? "{}").result?.completionsUsed)).toBe(12);
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("arc-po-session") ?? "{}").result?.completionsUsed)).toBe(5);
   await page.getByRole("link", { name: "Optimize", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Best candidate" })).toBeVisible();
-  await expect(page.getByText("12 completions · Claude Sonnet 4.5")).toBeVisible();
+  await expect(page.getByText("5 completions · Claude Sonnet 4.5")).toBeVisible();
   expect(await page.evaluate(() => window.optimizationStream.requests)).toBe(1);
 });
 

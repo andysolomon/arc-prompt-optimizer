@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { OPTIMIZE_PATTERNS } from "@/lib/pattern-candidates";
+import { DEFAULT_REWRITE_ATTEMPTS, MAX_PLAN_PATTERNS, TASK_TYPES } from "@/lib/arc-core/core/index.js";
 import type {
   CandidateEvaluation,
   PromptCandidate,
@@ -34,14 +34,36 @@ export type ModelId = (typeof MODEL_IDS)[number];
 
 export const MAX_PROMPT_CHARACTERS = 16_384;
 
-/** One completion per candidate, plus the rewrite generation when requested. */
-export function completionCount(rewrite: boolean): number {
-  return candidateCount(rewrite) + (rewrite ? 1 : 0);
+/** Revision rounds of the lesson's optimization loop after the first rewrite: score, revise the weakest checks, re-run. */
+export const MAX_REVISION_ROUNDS = 2;
+
+export interface CountRange {
+  readonly min: number;
+  readonly max: number;
 }
 
-/** Baseline, every catalog pattern, and the rewrite when requested. */
-export function candidateCount(rewrite: boolean): number {
-  return 1 + OPTIMIZE_PATTERNS.length + (rewrite ? 1 : 0);
+/**
+ * Candidates a run can rank: the baseline, the rewrite when requested, up to {@link MAX_PLAN_PATTERNS} pattern
+ * variants, and up to {@link MAX_REVISION_ROUNDS} revisions of the rewrite. The minimum is a failed rewrite with
+ * the fallback pattern trio.
+ */
+export function candidateRange(rewrite: boolean): CountRange {
+  return { min: 1 + MAX_PLAN_PATTERNS, max: 1 + MAX_PLAN_PATTERNS + (rewrite ? 1 + MAX_REVISION_ROUNDS : 0) };
+}
+
+/**
+ * Model completions a run can spend: one per candidate, plus the rewrite (one call and at most one retry) and, per
+ * revision round, the revise call (same retry) and the revision's own run.
+ */
+export function completionRange(rewrite: boolean): CountRange {
+  const candidates = candidateRange(rewrite);
+  if (!rewrite) return { min: candidates.min, max: 1 + MAX_PLAN_PATTERNS };
+  // Minimum: the rewrite call fails outright, leaving the baseline and the pattern trio. Maximum: a retried rewrite,
+  // its run, the baseline, the patterns, and every revision round with a retried revise call and its run.
+  return {
+    min: 1 + candidates.min,
+    max: DEFAULT_REWRITE_ATTEMPTS + 2 + MAX_PLAN_PATTERNS + MAX_REVISION_ROUNDS * (DEFAULT_REWRITE_ATTEMPTS + 1),
+  };
 }
 
 /** Bounds for the refine loop as offered by the web app; the core allows up to 4 of each. */
@@ -199,6 +221,14 @@ export const judgeReportSchema = z.discriminatedUnion("status", [
 
 export type JudgeReport = z.infer<typeof judgeReportSchema>;
 
+const operationalMeasurementsSchema = z.object({
+  latencyMs: measurementSchema,
+  inputTokens: measurementSchema,
+  outputTokens: measurementSchema,
+  totalTokens: measurementSchema,
+  costUsd: measurementSchema,
+});
+
 export const rewriteReportSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("not_requested") }),
   z.object({
@@ -206,15 +236,11 @@ export const rewriteReportSchema = z.discriminatedUnion("status", [
     candidateId: z.string(),
     analysis: z.array(z.string()),
     changes: z.array(z.string()),
-    measurements: z.object({
-      latencyMs: measurementSchema,
-      inputTokens: measurementSchema,
-      outputTokens: measurementSchema,
-      totalTokens: measurementSchema,
-      costUsd: measurementSchema,
-    }),
+    measurements: operationalMeasurementsSchema,
+    /** Completions spent, including a retry after an unparseable reply. */
+    attempts: z.number(),
   }),
-  z.object({ status: z.literal("failed"), reason: z.string() }),
+  z.object({ status: z.literal("failed"), reason: z.string(), attempts: z.number() }),
 ]);
 
 export type RewriteReport = z.infer<typeof rewriteReportSchema>;
@@ -262,6 +288,59 @@ export const refineReportSchema = z.discriminatedUnion("status", [
 ]);
 
 export type RefineReport = z.infer<typeof refineReportSchema>;
+export const planCriteriaSchema = z.object({
+  expectedFormat: z.enum(["json", "bullet_list", "numbered_list"]).optional(),
+  maxWords: z.number().optional(),
+  minWords: z.number().optional(),
+  requiredKeywords: z.array(z.string()),
+  forbiddenPhrases: z.array(z.string()),
+});
+
+/**
+ * How the run scored its candidates: the plan the rewrite step produced (task type, temperature, objective
+ * criteria), or the preview suite's non-empty check when the rewrite produced no usable criteria.
+ */
+export const planReportSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("planned"),
+    taskType: z.enum(TASK_TYPES),
+    temperature: z.number().optional(),
+    criteria: planCriteriaSchema,
+    suiteId: z.string(),
+    /** Patterns the plan chose, in candidate order. */
+    patterns: z.array(z.string()),
+  }),
+  z.object({ status: z.literal("default"), reason: z.string(), suiteId: z.string(), patterns: z.array(z.string()) }),
+]);
+
+export type PlanReport = z.infer<typeof planReportSchema>;
+
+/** One round of the optimization loop. */
+export const revisionReportSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("revised"),
+    round: z.number(),
+    candidateId: z.string(),
+    parentCandidateId: z.string(),
+    /** Check ids the parent failed and this revision was asked to fix. */
+    targeted: z.array(z.string()),
+    analysis: z.array(z.string()),
+    changes: z.array(z.string()),
+    measurements: operationalMeasurementsSchema,
+    attempts: z.number(),
+  }),
+  z.object({ status: z.literal("failed"), round: z.number(), parentCandidateId: z.string(), targeted: z.array(z.string()), reason: z.string(), attempts: z.number() }),
+]);
+
+export type RevisionReport = z.infer<typeof revisionReportSchema>;
+
+/** Why the loop stopped. */
+export const loopReportSchema = z.object({
+  rounds: z.number(),
+  stoppedBecause: z.enum(["rewrite_failed", "no_criteria", "all_checks_passed", "max_rounds", "time_budget", "revision_failed", "not_requested"]),
+});
+
+export type LoopReport = z.infer<typeof loopReportSchema>;
 
 export const optimizeResultSchema = z.object({
   baselineCandidateId: z.string(),
@@ -271,6 +350,9 @@ export const optimizeResultSchema = z.object({
   judge: judgeReportSchema,
   rewrite: rewriteReportSchema,
   refine: refineReportSchema,
+  plan: planReportSchema,
+  revisions: z.array(revisionReportSchema),
+  loop: loopReportSchema,
   completionsUsed: z.number(),
   model: z.enum(MODEL_IDS),
 });
@@ -288,12 +370,20 @@ export interface OptimizeResult {
   readonly rewrite: RewriteReport;
   readonly refine: RefineReport;
   /** Every completion requested from the model, including the rewrite and refine generations. */
+  readonly plan: PlanReport;
+  readonly revisions: readonly RevisionReport[];
+  readonly loop: LoopReport;
+  /** Every completion requested from the model, including the rewrite, retries, and revisions. */
   readonly completionsUsed: number;
   readonly model: ModelId;
 }
 
-/** Fixed step order of a run. `run:<candidateId>` repeats once per candidate; `refine:<round>` once per refine round. */
-export type StepName = "rewrite" | "render" | `run:${string}` | "judge" | `refine:${number}` | "rank";
+/**
+ * Step order of a run: `rewrite`, `render`, one `run:<candidateId>` per candidate, then per revision round a
+ * `revise` followed by the revision's `run:<candidateId>`, then `judge`, one `refine:<round>` per refine round when
+ * requested, and `rank`.
+ */
+export type StepName = "rewrite" | "render" | `run:${string}` | "revise" | "judge" | `refine:${number}` | "rank";
 
 export type StepEvent = {
   readonly step: StepName;
@@ -301,8 +391,13 @@ export type StepEvent = {
   readonly candidateIds?: readonly string[];
   /** Human labels matching `candidateIds`, sent with the `render` step. */
   readonly candidateLabels?: readonly string[];
-  /** Sent with the `rewrite` step. */
-  readonly status?: "rewritten" | "failed";
+  /** Sent with the `rewrite` and `revise` steps. */
+  readonly status?: "rewritten" | "revised" | "failed";
+  /** Sent with the `revise` step: the loop round (2 for the first revision). */
+  readonly round?: number;
+  /** Sent with a successful `revise` step: the revision candidate about to run. */
+  readonly candidateId?: string;
+  readonly candidateLabel?: string;
   /** Sent with each `refine:<round>` step: whether that round produced a better candidate. */
   readonly improved?: boolean;
 };

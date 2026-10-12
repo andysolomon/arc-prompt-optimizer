@@ -34,9 +34,16 @@ function loadSession(): PersistedSession | undefined {
       model: typeof parsed.model === "string" ? parsed.model : "",
       judge: typeof parsed.judge === "boolean" ? parsed.judge : true,
       refine: typeof parsed.refine === "boolean" ? parsed.refine : false,
-      // Results saved before the rewrite or refine existed have no report for them.
+      // Results saved by earlier versions lack the rewrite, plan, revision, loop, and refine reports.
       result: parsed.result
-        ? { ...parsed.result, rewrite: parsed.result.rewrite ?? { status: "not_requested" }, refine: parsed.result.refine ?? { status: "not_requested" } }
+        ? {
+            ...parsed.result,
+            rewrite: parsed.result.rewrite ?? { status: "not_requested" },
+            plan: parsed.result.plan ?? { status: "default", reason: "This result predates planned checks.", suiteId: "prompt-optimize-preview", patterns: [] },
+            revisions: parsed.result.revisions ?? [],
+            loop: parsed.result.loop ?? { rounds: 0, stoppedBecause: "not_requested" },
+            refine: parsed.result.refine ?? { status: "not_requested" },
+          }
         : null,
       selectedId: typeof parsed.selectedId === "string" ? parsed.selectedId : null,
       edited: parsed.edited ?? {},
@@ -170,7 +177,7 @@ function useSessionState() {
       setResult(next);
       setSelectedId(defaultSelectionId(next));
       setPhase("done");
-      if (next.rewrite.status === "failed") toast.warning(`The rewrite failed; ranking the remaining ${next.candidates.length} candidates.`);
+      if (next.rewrite.status === "failed") toast.warning(`The rewrite failed after ${next.rewrite.attempts} ${next.rewrite.attempts === 1 ? "attempt" : "attempts"}; ranking the baseline and ${next.candidates.length - 1} pattern variants instead.`);
       if (judgeForRun && next.judge.status === "failed") toast.warning("Jev judging failed; showing the deterministic ranking.");
       if (refineForRun !== undefined && next.refine.status === "failed") toast.warning(`Refining failed; showing the first-pass ranking. ${next.refine.reason}`);
     } catch (error) {

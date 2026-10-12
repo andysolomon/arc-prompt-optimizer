@@ -15,6 +15,8 @@ const eslintConfig = [
     ignores: [
       "node_modules/**",
       ".next/**",
+      // Playwright's second dev server builds into .next-clerk (see playwright.config.ts).
+      ".next-*/**",
       "out/**",
       "build/**",
       "next-env.d.ts",

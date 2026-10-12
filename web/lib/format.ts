@@ -32,5 +32,38 @@ const LABELS: Readonly<Record<string, string>> = {
 /** Human label for a candidate from its metadata label (or pattern name as a fallback). */
 export function candidateLabel(label: string | number | boolean | undefined, pattern: string): string {
   const key = typeof label === "string" ? label : pattern;
+  const revision = /^rewrite_v(\d+)$/u.exec(key);
+  if (revision !== null) return `Rewrite v${revision[1]}`;
   return LABELS[key] ?? key.replace(/_/gu, " ").replace(/^\w/u, (c) => c.toUpperCase());
+}
+
+const CRITERION_LABELS: Readonly<Record<string, string>> = {
+  format: "format",
+  max_words: "word limit",
+  min_words: "minimum words",
+  required_keyword: "required keyword",
+  forbidden_phrase: "forbidden phrase",
+  max_characters: "character limit",
+  min_characters: "non-empty",
+  exact_match: "exact match",
+  json_shape: "JSON shape",
+  list_shape: "list shape",
+};
+
+/** Human label for a deterministic check, with its expectation where that reads naturally. */
+export function checkLabel(check: { readonly criterion: string; readonly expected: string | number }): string {
+  const name = CRITERION_LABELS[check.criterion] ?? check.criterion.replace(/_/gu, " ");
+  switch (check.criterion) {
+    case "max_words":
+    case "min_words":
+    case "max_characters":
+      return `${name} ${check.expected}`;
+    case "required_keyword":
+    case "forbidden_phrase":
+      return `${name} "${check.expected}"`;
+    case "format":
+      return `${String(check.expected).replace(/_/gu, " ")} format`;
+    default:
+      return name;
+  }
 }
