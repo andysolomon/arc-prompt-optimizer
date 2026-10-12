@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REWRITE_PROTOCOL, listPatterns } from "@/lib/arc-core/core/index.js";
+import { REWRITE_PROTOCOL, buildRewritePrompt, listPatterns } from "@/lib/arc-core/core/index.js";
 import type { CompletionAdapter, CompletionRequest, CompletionResult } from "@/lib/arc-core/core/index.js";
 import { COMPLETION_TIMEOUT_MS, SLOW_COMPLETION_TIMEOUT_MS, completionTimeoutMs, runOptimization } from "@/lib/optimize-run";
 import { questionKey } from "@/lib/jev";
@@ -103,6 +103,17 @@ describe("runOptimization", () => {
       analysis: ["No format."],
       changes: ["Added a role.", "Set the format."],
     });
+  });
+
+  it("passes the task context and target use case to the rewrite meta-prompt only", async () => {
+    const adapter = new RewritingAdapter();
+    await runOptimization(
+      { prompt: "Summarize this.", model: "openai/gpt-5-mini", judge: false, rewrite: true, context: "Reports are markdown.", useCase: "Exec email" },
+      { env: {}, signal: new AbortController().signal, emit: () => {}, adapter },
+    );
+    expect(adapter.prompts[0]).toBe(buildRewritePrompt("Summarize this.", { context: "Reports are markdown.", useCase: "Exec email" }));
+    expect(adapter.prompts[0]).toContain("Target use case:\n```\nExec email\n```");
+    expect(adapter.prompts.slice(1).some((prompt) => prompt.includes("Exec email"))).toBe(false);
   });
 
   it("continues with the baseline and all pattern candidates when the rewrite reply cannot be parsed", async () => {

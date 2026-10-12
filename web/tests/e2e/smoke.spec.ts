@@ -13,6 +13,10 @@ test("paste prompt → confirm → result renders with the rewrite and every cat
 
   await page.getByRole("textbox", { name: "Prompt" }).fill(PROMPT);
   await expect(page.getByText(`${PROMPT.length} characters`)).toBeVisible();
+  // The optional rewrite details are collapsed until opened and ride along with the request.
+  await expect(page.getByRole("textbox", { name: "Target use case" })).toBeHidden();
+  await page.getByRole("button", { name: "Rewrite details (optional)" }).click();
+  await page.getByRole("textbox", { name: "Target use case" }).fill("A weekly email to executives.");
   await expect(page.getByRole("combobox", { name: "Model" })).toContainText("Claude Sonnet 4.5");
   await expect(optimize).toBeEnabled();
 
@@ -64,6 +68,7 @@ test("paste prompt → confirm → result renders with the rewrite and every cat
   await page.reload();
   await expect(page.getByRole("heading", { name: /candidate$/ })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Prompt" })).toHaveValue(PROMPT);
+  await expect(page.getByRole("textbox", { name: "Target use case" })).toHaveValue("A weekly email to executives.");
 });
 
 test("patterns page lists all nine catalog patterns", async ({ page }) => {

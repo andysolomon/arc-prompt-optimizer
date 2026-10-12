@@ -176,6 +176,8 @@ export async function runOptimization(request: OptimizeRequest, options: RunOpti
       model: request.model,
       timeoutMs: REWRITE_TIMEOUT_MS,
       signal: options.signal,
+      ...(request.context === undefined ? {} : { context: request.context }),
+      ...(request.useCase === undefined ? {} : { useCase: request.useCase }),
     });
     rewriteCompletions = 1;
     if (outcome.status === "rewritten") {

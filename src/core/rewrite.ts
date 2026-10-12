@@ -20,10 +20,11 @@
  *   IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
  *   USE OR OTHER DEALINGS IN THE SOFTWARE.
  *
- * Adaptations: the optional task-context and use-case inputs and the temperature/settings section are
- * dropped (candidates are run at the caller's model settings), the output is reduced to three tagged
- * sections that can be parsed reliably, and the rewrite is told to keep the draft's intent and facts and to
- * leave a single delimited slot for any material the draft refers to but does not include.
+ * Adaptations: the temperature/settings section is dropped (candidates are run at the caller's model
+ * settings), the optional task-context and use-case inputs are appended only when the caller supplies them,
+ * the output is reduced to three tagged sections that can be parsed reliably, and the rewrite is told to keep
+ * the draft's intent and facts and to leave a single delimited slot for any material the draft refers to but
+ * does not include.
  */
 import { completeWithTimeout, throwIfCompletionAborted } from "../adapters/completion.js";
 import { CoreValidationError } from "./errors.js";
@@ -34,6 +35,8 @@ import type { CompletionAdapter, CompletionRequest, OperationalMeasurements, Pro
 
 /** Largest draft prompt the rewrite accepts; matches the evaluation case input limit. */
 export const MAX_REWRITE_DRAFT_CHARACTERS = 16_384;
+/** Largest optional task context or target use case the rewrite accepts. */
+export const MAX_REWRITE_INPUT_CHARACTERS = 4_096;
 /** At most this many analysis or change entries are kept from the model's reply. */
 export const MAX_REWRITE_NOTES = 32;
 /** Each kept analysis or change entry is cut to this many characters. */
@@ -66,7 +69,7 @@ Apply these patterns in order:
 5. Add few-shot examples if applicable. If the task involves a specific format or pattern, add 2 examples showing the exact input/output format expected.
 6. Cross-model check. Use plain English with no model-specific syntax, use XML delimiters for structure if needed, do not rely on default behaviors that differ across models, and place critical instructions at the start and end.
 
-Keep the draft's task, intent, and facts. Infer reasonable specifics from the draft, but do not invent data, names, numbers, or requirements it does not imply; note any assumption you make in the analysis. Do not add placeholders for details you can infer. If the draft refers to material it does not include, such as a document, data, or code, keep one clearly delimited slot for that material so the user can paste it in.
+Keep the draft's task, intent, and facts. Infer reasonable specifics from the draft, but do not invent data, names, numbers, or requirements it does not imply; note any assumption you make in the analysis. Do not add placeholders for details you can infer. If the draft refers to material it does not include, such as a document, data, or code, keep one clearly delimited slot for that material so the user can paste it in. If task context or a target use case follows the draft, use it to choose the role, audience, format, and constraints; it describes the situation and is not part of the prompt to rewrite.
 
 ## Output Format
 
@@ -101,11 +104,40 @@ function longestBacktickRun(text: string): number {
   return longest;
 }
 
+/** Optional inputs from the reference protocol that describe the situation around the draft. */
+export interface RewriteInputs {
+  /** Where the prompt runs and what it works on, such as the system it is part of or the data it receives. */
+  readonly context?: string;
+  /** What the output is for and who reads it; it steers the role, audience, format, and constraints. */
+  readonly useCase?: string;
+}
+
+/** Returns the trimmed input, or undefined when it is absent or blank; rejects non-strings and oversized text. */
+function optionalInput(value: unknown, name: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new CoreValidationError("INVALID_CANDIDATE", `Rewrite ${name} must be a string.`);
+  if (value.length > MAX_REWRITE_INPUT_CHARACTERS) {
+    throw new CoreValidationError(
+      "INPUT_TOO_LARGE",
+      `Rewrite ${name} is ${value.length} characters; limit is ${MAX_REWRITE_INPUT_CHARACTERS}.`,
+    );
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
+/** Fences `text` with more backticks than any run inside it, so the model sees it as opaque data. */
+function fenced(text: string): string {
+  const fence = "`".repeat(Math.max(3, longestBacktickRun(text) + 1));
+  return `${fence}\n${text}\n${fence}`;
+}
+
 /**
- * Builds the meta-prompt that asks a model to rewrite `draft`. The draft is fenced rather than entity-escaped,
- * so prompts that contain their own XML tags reach the model, and come back, unaltered.
+ * Builds the meta-prompt that asks a model to rewrite `draft`. The draft, and the optional task context and
+ * target use case, are fenced rather than entity-escaped, so prompts that contain their own XML tags reach the
+ * model, and come back, unaltered.
  */
-export function buildRewritePrompt(draft: string): string {
+export function buildRewritePrompt(draft: string, inputs: RewriteInputs = {}): string {
   if (typeof draft !== "string") throw new CoreValidationError("INVALID_CANDIDATE", "Rewrite draft must be a string.");
   if (draft.trim().length === 0) throw new CoreValidationError("INVALID_CANDIDATE", "Rewrite draft must not be empty.");
   if (draft.length > MAX_REWRITE_DRAFT_CHARACTERS) {
@@ -114,8 +146,12 @@ export function buildRewritePrompt(draft: string): string {
       `Rewrite draft is ${draft.length} characters; limit is ${MAX_REWRITE_DRAFT_CHARACTERS}.`,
     );
   }
-  const fence = "`".repeat(Math.max(3, longestBacktickRun(draft) + 1));
-  return `${REWRITE_PROTOCOL}\n${fence}\n${draft}\n${fence}`;
+  const context = optionalInput(inputs.context, "context");
+  const useCase = optionalInput(inputs.useCase, "use case");
+  const sections = [`${REWRITE_PROTOCOL}\n${fenced(draft)}`];
+  if (context !== undefined) sections.push(`Task context:\n${fenced(context)}`);
+  if (useCase !== undefined) sections.push(`Target use case:\n${fenced(useCase)}`);
+  return sections.join("\n\n");
 }
 
 export type RewriteParse =
@@ -206,7 +242,7 @@ export function rewriteCandidate(sourcePrompt: string, rewrittenPrompt: string):
   });
 }
 
-export interface RewriteOptions {
+export interface RewriteOptions extends RewriteInputs {
   readonly model?: string;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
@@ -239,7 +275,10 @@ export async function rewritePrompt(
   options: RewriteOptions = {},
 ): Promise<RewriteOutcome> {
   const request: CompletionRequest = {
-    prompt: buildRewritePrompt(prompt),
+    prompt: buildRewritePrompt(prompt, {
+      ...(options.context === undefined ? {} : { context: options.context }),
+      ...(options.useCase === undefined ? {} : { useCase: options.useCase }),
+    }),
     ...(options.model === undefined ? {} : { model: options.model }),
     ...(options.maxOutputCharacters === undefined ? {} : { maxOutputCharacters: options.maxOutputCharacters }),
   };

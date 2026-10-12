@@ -61,6 +61,7 @@ export {
 } from "./preview.js";
 export {
   MAX_REWRITE_DRAFT_CHARACTERS,
+  MAX_REWRITE_INPUT_CHARACTERS,
   MAX_REWRITE_NOTES,
   MAX_REWRITE_NOTE_CHARACTERS,
   REWRITE_PATTERN,
@@ -70,7 +71,7 @@ export {
   rewriteCandidate,
   rewritePrompt,
 } from "./rewrite.js";
-export type { RewriteOptions, RewriteOutcome, RewriteParse } from "./rewrite.js";
+export type { RewriteInputs, RewriteOptions, RewriteOutcome, RewriteParse } from "./rewrite.js";
 export {
   DEFAULT_RANKING_OBJECTIVE,
   combineQuality,

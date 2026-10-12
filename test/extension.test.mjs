@@ -10,6 +10,7 @@ import arcPromptOptimizerExtension, {
   PROMPT_OPTIMIZE_COMMAND,
   PromptOptimizeUnsupportedModeError,
   REVIEW_KEEP_OPTION,
+  REWRITE_PREVIEW_COMPLETION_COUNT,
   REVIEW_SELECT_TITLE,
   buildPreviewCandidates,
   candidateSummaryLine,
@@ -25,6 +26,7 @@ import arcPromptOptimizerExtension, {
   runPromptOptimizeCommand,
   runWithProgress,
 } from "../dist/extension/index.js";
+import { REWRITE_PROTOCOL } from "../dist/core/index.js";
 
 const rootUrl = new URL("../", import.meta.url);
 
@@ -126,18 +128,22 @@ function userEntry(content) {
   return { type: "message", message: { role: "user", content } };
 }
 
-function fakeRegistry(models = [MODEL_A, MODEL_B], onComplete = () => {}) {
+/** A parseable reply to the rewrite meta-prompt, so the happy path ranks a rewrite candidate. */
+const REWRITE_REPLY = "<analysis>\n- No role.\n</analysis>\n<rewritten_prompt>\nYou are a tutor. Explain closures in 3 bullets.\n</rewritten_prompt>\n<changes>\n1. Added a role.\n</changes>";
+
+function fakeRegistry(models = [MODEL_A, MODEL_B], onComplete = () => {}, rewriteReply = REWRITE_REPLY) {
   const calls = [];
   return {
     calls,
     getAvailable: () => models,
     getAll: () => models,
     complete: async (model, context, options) => {
-      calls.push({ model: `${model.provider}/${model.id}`, prompt: context.messages[0].content, options });
+      const prompt = context.messages[0].content;
+      calls.push({ model: `${model.provider}/${model.id}`, prompt, options });
       onComplete(calls.length, options);
       return {
         role: "assistant",
-        content: [{ type: "text", text: `answer ${calls.length}` }],
+        content: [{ type: "text", text: prompt.startsWith(REWRITE_PROTOCOL) ? rewriteReply : `answer ${calls.length}` }],
         provider: model.provider,
         model: model.id,
         stopReason: "stop",
@@ -321,16 +327,43 @@ test("preview candidates are the baseline plus three pattern variants", () => {
   assert.equal(new Set(candidates.map((candidate) => candidate.id)).size, 4);
 });
 
-test("the preview run uses four completions on the selected model and ranks every candidate", async () => {
+test("the preview run rewrites first, then uses one completion per candidate on the selected model and ranks every candidate", async () => {
   const registry = fakeRegistry();
   const result = await runPreview({ prompt: "Draft a haiku.", model: "fake/model-b", modelRegistry: registry });
-  assert.equal(registry.calls.length, 4);
-  assert.equal(result.completionsUsed, 4);
+  assert.equal(registry.calls.length, REWRITE_PREVIEW_COMPLETION_COUNT);
+  assert.equal(result.completionsUsed, 6);
   assert.ok(registry.calls.every((call) => call.model === "fake/model-b"));
+  assert.ok(registry.calls[0].prompt.startsWith(REWRITE_PROTOCOL), "the rewrite is the first completion");
+  assert.ok(registry.calls[0].prompt.includes("Draft a haiku."));
+  assert.equal(registry.calls[1].prompt, "Draft a haiku.");
+  assert.equal(registry.calls[2].prompt, "You are a tutor. Explain closures in 3 bullets.", "the rewrite runs right after the baseline");
+  assert.equal(result.ranking.length, 5);
+  assert.equal(result.evaluations.length, 5);
+  assert.equal(result.baselineCandidateId, result.candidates[0].id);
+  assert.equal(result.candidates[1].prompt.pattern, "rewrite");
+  assert.equal(result.candidates[1].parentCandidateId, result.baselineCandidateId);
+  assert.deepEqual(result.rewrite, { status: "rewritten", candidateId: result.candidates[1].id, analysis: ["No role."], changes: ["Added a role."] });
+});
+
+test("the preview run continues without a rewrite candidate when the reply cannot be parsed", async () => {
+  const registry = fakeRegistry([MODEL_A], () => {}, "Here is a better prompt, no tags.");
+  const result = await runPreview({ prompt: "Draft a haiku.", model: "fake/model-a", modelRegistry: registry });
+  assert.equal(registry.calls.length, 5);
+  assert.equal(result.completionsUsed, 5);
+  assert.equal(result.ranking.length, 4);
+  assert.equal(result.rewrite.status, "failed");
+  assert.match(result.rewrite.reason, /rewritten_prompt/u);
+  assert.deepEqual(result.candidates.map((candidate) => candidate.prompt.pattern), ["baseline", "critique", "decomposition", "chain_of_thought"]);
+});
+
+test("rewrite: false skips the rewrite completion", async () => {
+  const registry = fakeRegistry();
+  const result = await runPreview({ prompt: "Draft a haiku.", model: "fake/model-b", modelRegistry: registry, rewrite: false });
+  assert.equal(registry.calls.length, PREVIEW_COMPLETION_COUNT);
+  assert.equal(result.completionsUsed, 4);
   assert.equal(registry.calls[0].prompt, "Draft a haiku.");
   assert.equal(result.ranking.length, 4);
-  assert.equal(result.evaluations.length, 4);
-  assert.equal(result.baselineCandidateId, result.candidates[0].id);
+  assert.deepEqual(result.rewrite, { status: "not_requested" });
 });
 
 test("aborting the preview run stops further completions", async () => {
@@ -385,7 +418,8 @@ test("the command confirms cost before calling a model and declining makes no co
   assert.equal(outcome.status, "declined");
   assert.equal(registry.calls.length, 0);
   const confirm = events.find((event) => event.name === "confirm");
-  assert.match(confirm.args[1], /4 model completions/u);
+  assert.match(confirm.args[1], /rewrite the prompt/u);
+  assert.match(confirm.args[1], /up to 6 model completions/u);
   assert.match(confirm.args[1], /fake\/model-a/u);
   assertNoForbiddenCalls(events);
 });
@@ -398,15 +432,32 @@ test("the command runs the preview, notifies a ranked summary, and keeps the edi
   });
   const outcome = await runPromptOptimizeCommand("", ctx, { createLoader: fakeLoaderFactory([]) });
   assert.equal(outcome.status, "kept");
-  assert.equal(outcome.result.ranking.length, 4);
+  assert.equal(outcome.result.ranking.length, 5);
+  assert.equal(outcome.result.rewrite.status, "rewritten");
   assert.equal(outcome.source.label, "editor draft");
   assert.equal(outcome.model.reference, "fake/model-b");
-  assert.equal(registry.calls.length, 4);
+  assert.equal(registry.calls.length, 6);
   const summary = events.filter((event) => event.name === "notify").at(-1);
   assert.equal(summary.args[1], "info");
+  assert.match(summary.args[0], /ranked 5 candidates/u);
   assert.match(summary.args[0], /baseline \(source\)/u);
+  assert.match(summary.args[0], /\d\. rewrite:/u);
   assert.match(summary.args[0], /score/u);
   assert.match(summary.args[0], /latency/u);
+  assert.doesNotMatch(summary.args[0], /Added a role/u, "rewrite notes are model output and stay out of notify");
+  assertNoForbiddenCalls(events);
+});
+
+test("a failed rewrite is reported in the summary and the run ranks the remaining candidates", async () => {
+  const registry = fakeRegistry([MODEL_A], () => {}, "no tags");
+  const { ctx, events } = commandContext({ registry, selections: [(options) => options.at(-1)] });
+  const outcome = await runPromptOptimizeCommand("Explain closures.", ctx, { createLoader: fakeLoaderFactory([]) });
+  assert.equal(outcome.status, "kept");
+  assert.equal(outcome.result.ranking.length, 4);
+  assert.equal(registry.calls.length, 5);
+  const summary = events.filter((event) => event.name === "notify").at(-1);
+  assert.match(summary.args[0], /ranked 4 candidates .* \(5 completions\)/u);
+  assert.match(summary.args[0], /The rewrite step failed \(rewrite reply has no complete <rewritten_prompt> section\)/u);
   assertNoForbiddenCalls(events);
 });
 
@@ -567,7 +618,7 @@ test("RPC mode runs the full dialog flow without custom UI and accepts a reviewe
   });
   assert.equal(outcome.status, "accepted");
   assert.equal(previews.length, 1);
-  assert.equal(registry.calls.length, 4);
+  assert.equal(registry.calls.length, 6);
   assert.equal(events.some((event) => event.name === "custom"), false);
   const writes = events.filter((event) => event.name === "setEditorText");
   assert.equal(writes.length, 1);

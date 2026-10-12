@@ -17,6 +17,10 @@ export function OptimizeView() {
     loadExample,
     prompt,
     setPrompt,
+    context,
+    setContext,
+    useCase,
+    setUseCase,
     model,
     setModel,
     judge,
@@ -62,6 +66,10 @@ export function OptimizeView() {
       <PromptForm
         prompt={prompt}
         onPromptChange={setPrompt}
+        context={context}
+        onContextChange={setContext}
+        useCase={useCase}
+        onUseCaseChange={setUseCase}
         models={models}
         modelsLoaded={modelsLoaded}
         model={model}

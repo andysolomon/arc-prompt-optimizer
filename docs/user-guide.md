@@ -15,20 +15,33 @@ The `prompt-optimize` skill (`skills/prompt-optimize/SKILL.md`) lets any skills-
    node <skill-dir>/scripts/arc-prompt-tools.mjs candidates --prompt-file prompt.txt --json </dev/null
    ```
 
-   The result is `{"candidates":[{"id","pattern","prompt"}]}`: the `baseline` prompt plus `critique`, `decomposition`, and `chain_of_thought` variants. Ids are stable for a given prompt. This is the same candidate set the Pi extension uses.
-3. It states the cost (4 generations with the current agent model) and waits for your confirmation.
-4. It produces one output per candidate, preferably in an isolated subagent or fresh context per candidate. Otherwise it answers each candidate independently.
-5. It writes an outputs file and scores it with no model call:
+   The result is `{"candidates":[{"id","pattern","prompt"}]}`: the `baseline` prompt plus `critique`, `decomposition`, and `chain_of_thought` variants. Ids are stable for a given prompt. This is the same pattern set the Pi extension uses.
+3. It states the cost (1 rewrite generation plus 5 candidate generations with the current agent model) and waits for your confirmation.
+4. It rewrites the prompt. The tool prints the rewrite meta-prompt with no model call, optionally carrying the task context and target use case you gave:
+
+   ```sh
+   node <skill-dir>/scripts/arc-prompt-tools.mjs rewrite-prompt --prompt-file prompt.txt --use-case "Weekly exec email" --json </dev/null
+   ```
+
+   The agent answers that meta-prompt with its own model and turns the reply into a `rewrite-<fingerprint>` candidate, again with no model call:
+
+   ```sh
+   node <skill-dir>/scripts/arc-prompt-tools.mjs rewrite-candidate --prompt-file prompt.txt --reply rewrite-reply.md --json </dev/null
+   ```
+
+   The result is `{"candidate":{"id","pattern":"rewrite","prompt"},"analysis":[…],"changes":[…]}`. A reply without a complete `<rewritten_prompt>` section fails with `INVALID_REWRITE_REPLY`, and the skill continues without the rewrite after one retry. See [Model rewrite](#model-rewrite) for what the protocol asks.
+5. It produces one output per candidate, preferably in an isolated subagent or fresh context per candidate. Otherwise it answers each candidate independently.
+6. It writes an outputs file and scores it with no model call:
 
    ```sh
    node <skill-dir>/scripts/arc-prompt-tools.mjs score --outputs outputs.json --json </dev/null
    ```
 
    Add `--suite <file.json>` to score against your own suite instead of the preview suite.
-6. It shows a ranked table, a line diff of each variant against the original, and the caveats below.
-7. You pick and optionally edit a candidate. The agent shows the final prompt. It never submits the prompt, never overwrites a file without your explicit approval, and deletes its temporary files.
+7. It shows a ranked table, a line diff of each variant against the original, the rewrite's analysis and change notes, and the caveats below.
+8. You pick and optionally edit a candidate. The agent shows the final prompt. It never submits the prompt, never overwrites a file without your explicit approval, and deletes its temporary files.
 
-`arc-prompt-tools.mjs` accepts exactly the `candidates` and `score` flags of `arc-prompt` and prints the same output. Like the CLI, it reads stdin whenever stdin is not a terminal, so redirect `</dev/null` when you pass files. If Node.js is unavailable, the skill rewrites the prompt into the three patterns by hand, checks only that outputs are non-empty, and reports that scores are unavailable.
+`arc-prompt-tools.mjs` accepts exactly the `candidates`, `rewrite-prompt`, `rewrite-candidate`, and `score` flags of `arc-prompt` and prints the same output. Like the CLI, it reads stdin whenever stdin is not a terminal, so redirect `</dev/null` when you pass files. If Node.js is unavailable, the skill applies the rewrite protocol and the three patterns by hand, checks only that outputs are non-empty, and reports that scores are unavailable.
 
 ### Outputs JSON
 
@@ -53,7 +66,7 @@ The `prompt-optimize` skill (`skills/prompt-optimize/SKILL.md`) lets any skills-
 
 ### Trade-offs
 
-- **Less independent.** The same agent writes the variants and produces their outputs. Separate model calls, as in the Pi extension or `arc-prompt optimize`, are more independent.
+- **Less independent.** The same agent writes the rewrite and the variants and produces their outputs. Separate model calls, as in the Pi extension or `arc-prompt optimize`, are more independent.
 - **Deterministic checks only.** No semantic judge runs. With the preview suite, every non-empty output scores 1, so the ranking mostly reflects whatever measurements the harness reported. Use a suite for a meaningful comparison.
 - **Measurements are usually unknown.** Most harnesses do not report per-response latency, tokens, or cost. The skill never estimates them.
 - **No editor integration.** Outside Pi, the skill cannot replace your editor text. It shows the chosen prompt for you to copy.
@@ -188,19 +201,27 @@ Every prompt is length-checked before the first completion runs.
 - **What a high score means.** A high score means the output passed *these deterministic checks* on *these cases* with *this model* at *this time*. It does not show that one prompt is better in general, that one model is better, or that results carry over to other inputs. Suites are small and completions are not deterministic, so a one-case difference can flip between runs.
 - **`--simulate` scores measure nothing about prompts.** The simulated adapter ignores the prompt and returns canned text chosen by `completionFixtureId`.
 - **Harness-produced scores are deterministic checks on agent-written outputs.** `arc-prompt score` and the skill tool never call a model. See [Harness-agnostic workflow](#harness-agnostic-workflow) for trade-offs.
-- **The `/prompt-optimize` preview ranking is mostly operational.** Its built-in suite has one case whose only criterion is `minCharacters: 1` (non-empty output). Any non-empty reply scores 1, so ranking falls through to tokens, latency, and cost. Treat the review step as a side-by-side reading aid, not a quality verdict.
+- **The `/prompt-optimize` preview ranking is mostly operational.** Its built-in suite has one case whose only criterion is `minCharacters: 1` (non-empty output). Any non-empty reply scores 1, so ranking falls through to tokens, latency, and cost. Treat the review step as a side-by-side reading aid, not a quality verdict. The rewrite candidate is the one whose text actually changes; the pattern variants wrap the original.
 
-## Model rewrite (library)
+## Model rewrite
 
 `rewritePrompt(adapter, prompt, options)` asks a model to rewrite a draft prompt before it is compared, which is the step the three pattern templates cannot do on their own: they only wrap your words, while the rewrite adds a specific role, an explicit output format, positive, negative, and conditional constraints, and examples where the format matters.
 
 - It makes exactly one completion through the `CompletionAdapter` you pass, with the same `model`, `timeoutMs`, and `signal` options as an evaluation. It is explicit generation: nothing calls it automatically.
+- `options.context` (where the prompt runs and what it works on) and `options.useCase` (what the output is for and who reads it) are optional, at most 4,096 characters each, and are appended to the meta-prompt as fenced sections after the draft. The model is told they describe the situation and are not part of the prompt to rewrite. Blank values are omitted. `buildRewritePrompt(draft, { context, useCase })` builds the same meta-prompt without a model call.
 - The reply must contain `<analysis>`, `<rewritten_prompt>`, and `<changes>` sections. The last complete `<rewritten_prompt>` section wins, so reasoning that mentions the tags is ignored. A missing or empty section is reported as `invalid`, never guessed.
 - On success it returns a `rewrite-<fingerprint>` candidate with origin `explicit_generation` and the baseline as its parent, ready to evaluate next to `buildPreviewCandidates`, plus the weakness and change notes and the completion's measurements.
 - Adapter errors and timeouts return `failed`; cancellation is rethrown so the caller's run stops.
 - The model is told to keep the draft's intent and facts, not to invent data, and to leave one delimited slot for any material the draft refers to but does not include.
 
-The CLI, the Pi extension, and the `prompt-optimize` skill do not call it yet. The web app in `web/` does. The protocol is adapted from the prompt optimizer in [AI Engineering from Scratch](https://github.com/rohitg00/ai-engineering-from-scratch) under the MIT License; see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+Where it runs:
+
+- The `prompt-optimize` skill runs it through the agent's own model with the `rewrite-prompt` and `rewrite-candidate` tool commands (see [Harness-agnostic workflow](#harness-agnostic-workflow)), which is where task context and use case can be supplied from the conversation.
+- The Pi extension's `/prompt-optimize` runs it first, so the preview compares the baseline, the rewrite, and the three pattern variants (up to 6 completions). A failed or unparseable rewrite is reported in the ranking summary and the preview continues with the four other candidates. The extension takes no context or use case: it only has the prompt from the command, editor, or last message.
+- The web app in `web/` runs it with optional "Rewrite details" fields for context and use case.
+- `arc-prompt optimize` and `arc-prompt evaluate` do not run it; they take a suite and the three pattern variants only.
+
+The protocol is adapted from the prompt optimizer in [AI Engineering from Scratch](https://github.com/rohitg00/ai-engineering-from-scratch) under the MIT License; see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
 ## Model selection
 

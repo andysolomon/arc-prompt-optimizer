@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   CompletionCancelledError,
   MAX_REWRITE_DRAFT_CHARACTERS,
+  MAX_REWRITE_INPUT_CHARACTERS,
   PREVIEW_SUITE,
   REWRITE_PROTOCOL,
   baselineCandidate,
@@ -44,6 +45,29 @@ test("buildRewritePrompt keeps XML in the draft and fences past any backticks in
   const prompt = buildRewritePrompt(draft);
   assert.ok(prompt.includes(draft), "draft is not entity-escaped");
   assert.ok(prompt.endsWith("`````\n" + draft + "\n`````"));
+});
+
+test("buildRewritePrompt appends fenced task context and target use case only when given", () => {
+  const plain = buildRewritePrompt(DRAFT);
+  assert.ok(!plain.includes("Task context:"));
+  assert.ok(!plain.includes("Target use case:"));
+  assert.equal(buildRewritePrompt(DRAFT, { context: "  ", useCase: "" }), plain, "blank inputs are omitted");
+
+  const both = buildRewritePrompt(DRAFT, { context: "Reports come from PagerDuty as `markdown`.", useCase: " Weekly exec email " });
+  assert.ok(both.startsWith(plain));
+  assert.ok(both.includes("\n\nTask context:\n```\nReports come from PagerDuty as `markdown`.\n```"));
+  assert.ok(both.endsWith("\n\nTarget use case:\n```\nWeekly exec email\n```"), "inputs are trimmed and the use case comes last");
+  assert.ok(buildRewritePrompt(DRAFT, { context: "```\ncode\n```" }).includes("````\n```\ncode\n```\n````"), "context fences past its own backticks");
+
+  const onlyUseCase = buildRewritePrompt(DRAFT, { useCase: "Chatbot" });
+  assert.ok(!onlyUseCase.includes("Task context:"));
+  assert.ok(onlyUseCase.endsWith("Target use case:\n```\nChatbot\n```"));
+});
+
+test("buildRewritePrompt rejects malformed and oversized context or use case", () => {
+  assert.throws(() => buildRewritePrompt(DRAFT, { context: 42 }), { code: "INVALID_CANDIDATE" });
+  assert.throws(() => buildRewritePrompt(DRAFT, { useCase: "x".repeat(MAX_REWRITE_INPUT_CHARACTERS + 1) }), { code: "INPUT_TOO_LARGE" });
+  assert.ok(buildRewritePrompt(DRAFT, { context: "x".repeat(MAX_REWRITE_INPUT_CHARACTERS) }).includes("x".repeat(MAX_REWRITE_INPUT_CHARACTERS)));
 });
 
 test("buildRewritePrompt rejects empty and oversized drafts", () => {
@@ -118,11 +142,12 @@ test("rewritePrompt makes one completion and returns a candidate the evaluator a
     latencyMs: 120,
     usage: { inputTokens: 900, outputTokens: 300 },
   });
-  const outcome = await rewritePrompt(adapter, DRAFT, { model: "test/model", timeoutMs: 1_000 });
+  const outcome = await rewritePrompt(adapter, DRAFT, { model: "test/model", timeoutMs: 1_000, context: "Reports are markdown.", useCase: "Exec email" });
   assert.equal(outcome.status, "rewritten");
   assert.equal(adapter.requests.length, 1);
   assert.equal(adapter.requests[0].model, "test/model");
   assert.ok(adapter.requests[0].prompt.includes(DRAFT));
+  assert.equal(adapter.requests[0].prompt, buildRewritePrompt(DRAFT, { context: "Reports are markdown.", useCase: "Exec email" }));
   assert.deepEqual(outcome.measurements.totalTokens, { status: "measured", value: 1_200 });
   assert.deepEqual(outcome.changes, ["Added a role."]);
 

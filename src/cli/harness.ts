@@ -10,6 +10,8 @@ import {
 } from "../core/evaluation.js";
 import { buildPreviewCandidates } from "../core/preview.js";
 import { DEFAULT_RANKING_OBJECTIVE, rankCandidates } from "../core/ranking.js";
+import { buildRewritePrompt, parseRewriteOutput, rewriteCandidate } from "../core/rewrite.js";
+import type { RewriteInputs } from "../core/rewrite.js";
 import type {
   CandidateEvaluation,
   CaseEvaluation,
@@ -48,22 +50,52 @@ export interface HarnessScoreResult {
   readonly objective: RankingObjective;
 }
 
+export interface HarnessRewriteCandidate {
+  readonly candidate: HarnessCandidateView;
+  readonly analysis: readonly string[];
+  readonly changes: readonly string[];
+}
+
+export type HarnessRewriteParse = { readonly status: "parsed"; readonly value: HarnessRewriteCandidate } | { readonly status: "invalid"; readonly reason: string };
+
 function candidateLabel(candidate: PromptCandidate): string {
   const label = candidate.metadata?.["label"];
   return typeof label === "string" ? label : candidate.prompt.pattern;
 }
 
+function candidateView(candidate: PromptCandidate): HarnessCandidateView {
+  return Object.freeze({
+    id: candidate.id,
+    pattern: candidate.prompt.pattern,
+    label: candidateLabel(candidate),
+    prompt: candidate.prompt.text,
+  });
+}
+
 export function harnessCandidates(prompt: string): readonly HarnessCandidateView[] {
-  return Object.freeze(
-    buildPreviewCandidates(prompt).map((candidate) =>
-      Object.freeze({
-        id: candidate.id,
-        pattern: candidate.prompt.pattern,
-        label: candidateLabel(candidate),
-        prompt: candidate.prompt.text,
-      }),
-    ),
-  );
+  return Object.freeze(buildPreviewCandidates(prompt).map(candidateView));
+}
+
+/** The rewrite meta-prompt for the harness's own model to answer; no model call is made here. */
+export function harnessRewritePrompt(prompt: string, inputs: RewriteInputs = {}): string {
+  return buildRewritePrompt(prompt, inputs);
+}
+
+/**
+ * Turns the harness model's reply to {@link harnessRewritePrompt} into a `rewrite-<fingerprint>` candidate whose
+ * id `scoreHarnessOutputs` accepts next to the preview candidates. An unparseable reply is reported, never guessed.
+ */
+export function harnessRewriteCandidate(prompt: string, reply: string): HarnessRewriteParse {
+  const parsed = parseRewriteOutput(reply);
+  if (parsed.status === "invalid") return Object.freeze({ status: "invalid", reason: parsed.reason });
+  return Object.freeze({
+    status: "parsed",
+    value: Object.freeze({
+      candidate: candidateView(rewriteCandidate(prompt, parsed.rewrittenPrompt)),
+      analysis: parsed.analysis,
+      changes: parsed.changes,
+    }),
+  });
 }
 
 function validateMeasurement(value: unknown, label: string): Partial<Record<(typeof MEASUREMENT_KEYS)[number], number>> {
