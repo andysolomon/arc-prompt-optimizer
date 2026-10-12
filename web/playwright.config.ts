@@ -25,6 +25,12 @@ export default defineConfig({
       OPENAI_API_KEY: "",
       GOOGLE_GENERATIVE_AI_API_KEY: "",
       TYPESAFE_API_KEY: "",
+      // Sign-in UI with placeholder OAuth clients; auth.spec.ts stops the browser before any provider is reached.
+      AUTH_SECRET: "playwright-only-secret-not-for-production",
+      AUTH_GOOGLE_ID: "google-test-client",
+      AUTH_GOOGLE_SECRET: "google-test-secret",
+      AUTH_TWITTER_ID: "x-test-client",
+      AUTH_TWITTER_SECRET: "x-test-secret",
       NEXT_TELEMETRY_DISABLED: "1",
     },
   },
