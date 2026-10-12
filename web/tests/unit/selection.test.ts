@@ -28,6 +28,7 @@ function result(ranking: RankedCandidate[], rewriteId: string | null, revisions:
     plan: { status: "default", reason: "n/a", suiteId: "prompt-optimize-preview", patterns: [] },
     revisions,
     loop: { rounds: revisions.length, stoppedBecause: "not_requested" },
+    refine: { status: "not_requested" },
     completionsUsed: 6,
     model: "minimax/MiniMax-M3",
   };

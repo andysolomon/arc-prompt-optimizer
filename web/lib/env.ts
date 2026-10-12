@@ -11,6 +11,8 @@ export interface ServerEnv {
   readonly UPSTASH_REDIS_REST_TOKEN?: string;
   /** Test-only: serve canned completions and judge answers instead of calling providers. */
   readonly ARC_MOCK_PROVIDERS?: string;
+  /** Feature flag: "1" offers the iterative refine loop in the UI and accepts `refine` on `/api/optimize`. */
+  readonly ARC_REFINE_ENABLED?: string;
 }
 
 function clean(value: string | undefined): string | undefined {
@@ -30,7 +32,13 @@ export function readServerEnv(source: NodeJS.ProcessEnv = process.env): ServerEn
     UPSTASH_REDIS_REST_URL: clean(source.UPSTASH_REDIS_REST_URL ?? source.KV_REST_API_URL),
     UPSTASH_REDIS_REST_TOKEN: clean(source.UPSTASH_REDIS_REST_TOKEN ?? source.KV_REST_API_TOKEN),
     ARC_MOCK_PROVIDERS: clean(source.ARC_MOCK_PROVIDERS),
+    ARC_REFINE_ENABLED: clean(source.ARC_REFINE_ENABLED),
   };
+}
+
+/** The refine loop is opt-in per deployment; mock providers enable it so the smoke test can exercise it. */
+export function refineEnabled(env: ServerEnv): boolean {
+  return env.ARC_REFINE_ENABLED === "1" || mockProvidersEnabled(env);
 }
 
 /** Mock providers are a test fixture; they are never enabled in a Vercel production deployment. */

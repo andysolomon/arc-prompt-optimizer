@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MAX_PLAN_PATTERNS } from "@/lib/arc-core/core/index.js";
-import { MAX_REVISION_ROUNDS, candidateRange, completionRange, type CountRange } from "@/lib/types";
+import { MAX_REVISION_ROUNDS, candidateRange, completionRange, refineCompletionCount, type CountRange, type RefineSettings } from "@/lib/types";
 
 export function confirmBody(rewrite: boolean): string {
   return rewrite
@@ -20,6 +20,7 @@ export function ConfirmDialog({
   modelLabel,
   judge,
   rewrite,
+  refine,
   onCancel,
   onRun,
 }: {
@@ -27,6 +28,7 @@ export function ConfirmDialog({
   modelLabel: string;
   judge: boolean;
   rewrite: boolean;
+  refine?: RefineSettings | undefined;
   onCancel: () => void;
   onRun: () => void;
 }) {
@@ -49,11 +51,19 @@ export function ConfirmDialog({
             </>
           ) : null}
           <dt className="text-muted-foreground">Completions</dt>
-          <dd className="m-0">{formatRange(completionRange(rewrite))}</dd>
+          <dd className="m-0">{refine ? `${formatRange(completionRange(rewrite))}, then up to ${refineCompletionCount(refine)} more while refining` : formatRange(completionRange(rewrite))}</dd>
           <dt className="text-muted-foreground">Judge</dt>
           <dd className="m-0">
             {judge ? `Jev (TypeSafe) · 1 request, ${formatRange(candidateRange(rewrite))} Score questions` : "Deterministic checks only"}
           </dd>
+          {refine ? (
+            <>
+              <dt className="text-muted-foreground">Refine</dt>
+              <dd className="m-0">
+                {refine.rounds} rounds × {refine.variants} revisions of the top candidate, each judged by Jev
+              </dd>
+            </>
+          ) : null}
         </dl>
         <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
           <Button type="button" variant="outline" className="h-9 px-3.5" onClick={onCancel}>

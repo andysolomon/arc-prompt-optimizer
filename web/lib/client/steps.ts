@@ -18,7 +18,7 @@ const PLANNED_RUN = "planned-run:";
  * the actual candidates, so a failed rewrite never leaves the list misaligned. Revision rounds are added as the
  * server reports them, since whether a round happens depends on the scores.
  */
-export function planSteps(judge: boolean, rewrite: boolean): StepState {
+export function planSteps(judge: boolean, rewrite: boolean, refineRounds = 0): StepState {
   const runs = ["baseline", ...(rewrite ? ["rewrite"] : []), `up to ${MAX_PLAN_PATTERNS} pattern variants`];
   return {
     steps: [
@@ -26,6 +26,7 @@ export function planSteps(judge: boolean, rewrite: boolean): StepState {
       { key: "render", label: "Render candidates" },
       ...runs.map((name) => ({ key: `${PLANNED_RUN}${name}`, label: `Run ${name}` })),
       ...(judge ? [{ key: "judge", label: "Score outputs with Jev" }] : []),
+      ...Array.from({ length: refineRounds }, (_, index) => ({ key: `refine:${index + 1}`, label: `Refine the best candidate, round ${index + 1}` })),
       { key: "rank", label: "Rank candidates" },
     ],
     done: [],
@@ -65,6 +66,9 @@ export function advanceSteps(state: StepState, event: StepEvent): StepState {
       items.push({ key: `run:${event.candidateId}`, label: `Run ${(event.candidateLabel ?? event.candidateId).toLowerCase()}` });
     }
     if (!steps.some((step) => step.key === key)) steps = insertBefore(steps, ["judge", "rank"], items);
+  }
+  if (event.step.startsWith("refine:") && event.improved !== undefined) {
+    steps = steps.map((step) => (step.key === event.step ? { key: step.key, label: `${step.label} (${event.improved ? "improved" : "no gain"})` } : step));
   }
   const done = state.done.includes(key) ? state.done : [...state.done, key];
   return { steps, done };

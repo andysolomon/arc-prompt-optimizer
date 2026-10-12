@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { mockProvidersEnabled, readServerEnv } from "@/lib/env";
+import { mockProvidersEnabled, readServerEnv, refineEnabled } from "@/lib/env";
 import { MODELS, availableModels } from "@/lib/models";
 import type { ModelsResponse } from "@/lib/types";
 
@@ -12,6 +12,7 @@ export async function GET(): Promise<Response> {
   const body: ModelsResponse = {
     models: mock ? MODELS.map(({ id, label, provider }) => ({ id, label, provider })) : [...availableModels(process.env)],
     judgeAvailable: mock || env.TYPESAFE_API_KEY !== undefined,
+    refineAvailable: refineEnabled(env),
   };
   return NextResponse.json(body, { headers: { "Cache-Control": "no-store" } });
 }

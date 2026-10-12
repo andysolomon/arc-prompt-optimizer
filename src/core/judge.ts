@@ -25,6 +25,8 @@ export interface JudgeRequestInput {
   readonly input: string | null;
   readonly expectedOutput: string | null;
   readonly candidateOutput: string;
+  /** Kept on the request for judges that score the prompt/output pair; it is not rendered into the judge prompt. */
+  readonly candidatePrompt?: string;
 }
 
 export type JudgeRequestBuild =
@@ -75,6 +77,7 @@ export function buildJudgeRequest(input: JudgeRequestInput): JudgeRequestBuild {
       input: input.input,
       expectedOutput: input.expectedOutput,
       candidateOutput: input.candidateOutput,
+      ...(input.candidatePrompt === undefined ? {} : { candidatePrompt: input.candidatePrompt }),
       prompt,
     }),
   };

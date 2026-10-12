@@ -1,12 +1,21 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { streamOptimize } from "@/lib/client/sse";
 import { defaultSelectionId } from "@/lib/client/selection";
 import { advanceSteps, planSteps, type StepState } from "@/lib/client/steps";
 import { modelLabel } from "@/lib/models";
-import { MAX_PROMPT_CHARACTERS, MAX_REWRITE_DETAIL_CHARACTERS, type ModelInfo, type ModelsResponse, type OptimizeResult } from "@/lib/types";
+import {
+  MAX_PROMPT_CHARACTERS,
+  MAX_REWRITE_DETAIL_CHARACTERS,
+  REFINE_DEFAULT_ROUNDS,
+  REFINE_DEFAULT_VARIANTS,
+  type ModelInfo,
+  type ModelsResponse,
+  type OptimizeResult,
+  type RefineSettings,
+} from "@/lib/types";
 
 const SESSION_KEY = "arc-po-session";
 /** The model rewrites every prompt before the run; the API also accepts `rewrite: false`. */
@@ -20,6 +29,7 @@ interface PersistedSession {
   useCase: string;
   model: string;
   judge: boolean;
+  refine: boolean;
   result: OptimizeResult | null;
   selectedId: string | null;
   edited: Record<string, string>;
@@ -36,7 +46,8 @@ function loadSession(): PersistedSession | undefined {
       useCase: typeof parsed.useCase === "string" ? parsed.useCase : "",
       model: typeof parsed.model === "string" ? parsed.model : "",
       judge: typeof parsed.judge === "boolean" ? parsed.judge : true,
-      // Results saved by earlier versions lack the rewrite, plan, revision, and loop reports.
+      refine: typeof parsed.refine === "boolean" ? parsed.refine : false,
+      // Results saved by earlier versions lack the rewrite, plan, revision, loop, and refine reports.
       result: parsed.result
         ? {
             ...parsed.result,
@@ -44,6 +55,7 @@ function loadSession(): PersistedSession | undefined {
             plan: parsed.result.plan ?? { status: "default", reason: "This result predates planned checks.", suiteId: "prompt-optimize-preview", patterns: [] },
             revisions: parsed.result.revisions ?? [],
             loop: parsed.result.loop ?? { rounds: 0, stoppedBecause: "not_requested" },
+            refine: parsed.result.refine ?? { status: "not_requested" },
           }
         : null,
       selectedId: typeof parsed.selectedId === "string" ? parsed.selectedId : null,
@@ -61,9 +73,11 @@ function useSessionState() {
   const [useCase, setUseCase] = useState("");
   const [model, setModel] = useState("");
   const [judge, setJudge] = useState(true);
+  const [refine, setRefine] = useState(false);
   const [models, setModels] = useState<readonly ModelInfo[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [judgeAvailable, setJudgeAvailable] = useState(false);
+  const [refineAvailable, setRefineAvailable] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [stepState, setStepState] = useState<StepState>(() => planSteps(true, REWRITE));
   const [result, setResult] = useState<OptimizeResult | null>(null);
@@ -80,6 +94,7 @@ function useSessionState() {
       setUseCase(session.useCase);
       setModel(session.model);
       setJudge(session.judge);
+      setRefine(session.refine);
       setResult(session.result);
       setSelectedId(session.selectedId);
       setEdited(session.edited);
@@ -91,12 +106,12 @@ function useSessionState() {
   useEffect(() => {
     if (!hydrated) return;
     try {
-      const session: PersistedSession = { prompt, context, useCase, model, judge, result, selectedId, edited };
+      const session: PersistedSession = { prompt, context, useCase, model, judge, refine, result, selectedId, edited };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
     } catch {
       /* storage unavailable or full */
     }
-  }, [hydrated, prompt, context, useCase, model, judge, result, selectedId, edited]);
+  }, [hydrated, prompt, context, useCase, model, judge, refine, result, selectedId, edited]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -105,6 +120,7 @@ function useSessionState() {
       .then((data) => {
         setModels(data.models);
         setJudgeAvailable(data.judgeAvailable);
+        setRefineAvailable(data.refineAvailable ?? false);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
@@ -130,6 +146,12 @@ function useSessionState() {
   const detailsWithinLimit = context.length <= MAX_REWRITE_DETAIL_CHARACTERS && useCase.length <= MAX_REWRITE_DETAIL_CHARACTERS;
   const canRun = !trimmedEmpty && prompt.length <= MAX_PROMPT_CHARACTERS && detailsWithinLimit && phase !== "running" && model !== "";
   const effectiveJudge = judge && judgeAvailable;
+  // The refine loop iterates on Jev scores, so it is only offered alongside the judge.
+  const effectiveRefine = refine && refineAvailable && effectiveJudge;
+  const refineSettings = useMemo<RefineSettings | undefined>(
+    () => (effectiveRefine ? { rounds: REFINE_DEFAULT_ROUNDS, variants: REFINE_DEFAULT_VARIANTS } : undefined),
+    [effectiveRefine],
+  );
   const currentModelLabel = modelLabel(model);
 
   const cancelRun = useCallback(() => {
@@ -155,7 +177,8 @@ function useSessionState() {
     const controller = new AbortController();
     controllerRef.current = controller;
     const judgeForRun = effectiveJudge;
-    setStepState(planSteps(judgeForRun, REWRITE));
+    const refineForRun = refineSettings;
+    setStepState(planSteps(judgeForRun, REWRITE, refineForRun?.rounds ?? 0));
     setPhase("running");
     setResult(null);
     setSelectedId(null);
@@ -169,6 +192,7 @@ function useSessionState() {
           rewrite: REWRITE,
           ...(context.trim() === "" ? {} : { context }),
           ...(useCase.trim() === "" ? {} : { useCase }),
+          ...(refineForRun === undefined ? {} : { refine: refineForRun }),
         },
         controller.signal,
         (event) => {
@@ -181,6 +205,7 @@ function useSessionState() {
       setPhase("done");
       if (next.rewrite.status === "failed") toast.warning(`The rewrite failed after ${next.rewrite.attempts} ${next.rewrite.attempts === 1 ? "attempt" : "attempts"}; ranking the baseline and ${next.candidates.length - 1} pattern variants instead.`);
       if (judgeForRun && next.judge.status === "failed") toast.warning("Jev judging failed; showing the deterministic ranking.");
+      if (refineForRun !== undefined && next.refine.status === "failed") toast.warning(`Refining failed; showing the first-pass ranking. ${next.refine.reason}`);
     } catch (error) {
       if (controller.signal.aborted) return;
       toast.error(error instanceof Error ? error.message : "Optimization failed.");
@@ -188,7 +213,7 @@ function useSessionState() {
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null;
     }
-  }, [context, effectiveJudge, model, prompt, useCase]);
+  }, [context, effectiveJudge, model, prompt, refineSettings, useCase]);
 
   return {
     hydrated,
@@ -203,9 +228,12 @@ function useSessionState() {
     setModel,
     judge,
     setJudge,
+    refine,
+    setRefine,
     models,
     modelsLoaded,
     judgeAvailable,
+    refineAvailable,
     phase,
     setPhase,
     stepState,
@@ -216,6 +244,7 @@ function useSessionState() {
     setEdited,
     canRun,
     effectiveJudge,
+    refineSettings,
     currentModelLabel,
     cancelRun,
     startRun,

@@ -1,5 +1,5 @@
 import { CoreValidationError } from "./errors.mjs";
-import { completeWithTimeout, MAX_COMPLETION_MODEL_CHARACTERS, MAX_COMPLETION_OUTPUT_CHARACTERS, MAX_COMPLETION_TIMEOUT_MS, normalizeCompletionRequest, throwIfCompletionAborted, validateCompletionResult, } from "../adapters/completion.mjs";
+import { completeWithTimeout, MAX_COMPLETION_MODEL_CHARACTERS, MAX_COMPLETION_OUTPUT_CHARACTERS, MAX_COMPLETION_TIMEOUT_MS, normalizeCompletionRequest, throwIfCompletionAborted, validateCompletionResult, validateTemperature, } from "../adapters/completion.mjs";
 import { MAX_CRITERION_TERM_CHARACTERS, MAX_FIXTURE_CHECK_CHARACTERS, countWords, matchesFormat, nonEmptyLines, validateDeterministicCriteria, } from "./fixture-checks.mjs";
 import { buildJudgeRequest, runSemanticJudge } from "./judge.mjs";
 import { encodedTemplateValueLength, escapeTemplateValue } from "./template.mjs";
@@ -509,7 +509,8 @@ function validateOptions(value) {
     if (value === undefined)
         return Object.freeze({});
     const options = expectRecord(value, "INVALID_EVALUATION", "Evaluate options");
-    rejectUnknownKeys(options, ["judge", "model", "maxOutputCharacters", "signal", "timeoutMs"], "INVALID_EVALUATION", "Evaluate options");
+    rejectUnknownKeys(options, ["judge", "model", "maxOutputCharacters", "signal", "timeoutMs", "temperature"], "INVALID_EVALUATION", "Evaluate options");
+    validateTemperature(readOwnField(options, "temperature"), "Evaluate option 'temperature'");
     const judge = readOwnField(options, "judge");
     if (judge !== undefined &&
         (judge === null || typeof judge !== "object" || typeof judge.judge !== "function")) {
@@ -589,11 +590,13 @@ function buildCompletionRequest(candidate, evaluationCase, options) {
     const prompt = buildEvaluationPrompt(candidate, evaluationCase);
     const model = readOwnField(options, "model");
     const maxOutputCharacters = readOwnField(options, "maxOutputCharacters");
+    const temperature = readOwnField(options, "temperature");
     return {
         fixtureId: evaluationCase.completionFixtureId,
         ...(model === undefined ? {} : { model }),
         prompt,
         ...(maxOutputCharacters === undefined ? {} : { maxOutputCharacters }),
+        ...(temperature === undefined ? {} : { temperature }),
     };
 }
 /** Validates every evaluation prompt and request option before the first completion can run. */
@@ -646,6 +649,7 @@ export async function evaluateCase(adapter, candidate, evaluationCase, options) 
             input: readOwnField(checkedCase, "input") ?? null,
             expectedOutput: readOwnField(checkedCase, "expectedOutput") ?? null,
             candidateOutput: text,
+            candidatePrompt: checkedCandidate.prompt.text,
         });
         judgeOutcome = request.status === "skipped" ? request.outcome : await runSemanticJudge(judge, request.request);
     }

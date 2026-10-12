@@ -100,6 +100,14 @@ function reasonsFor(result: OptimizeResult, candidateId: string): RowView["reaso
       changes: revision.changes,
     };
   }
+  if (result.refine.status === "refined") {
+    for (const round of result.refine.rounds) {
+      const attempt = round.attempts.find((entry) => entry.status === "evaluated" && entry.candidateId === candidateId);
+      if (attempt !== undefined && attempt.status === "evaluated") {
+        return { title: `Why it was refined (round ${round.round})`, analysisTitle: "What the previous output got wrong", analysis: attempt.analysis, changes: attempt.changes };
+      }
+    }
+  }
   return undefined;
 }
 
@@ -155,6 +163,8 @@ export function ResultPanel({
   const planned = result.plan.status === "planned" ? result.plan : undefined;
   const criteria = planned === undefined ? [] : describeCriteria(planned);
   const summary = loopSummary(result);
+  const refineReport = result.refine.status === "refined" ? result.refine : undefined;
+  const improvedRounds = refineReport?.rounds.filter((round) => round.improved).length ?? 0;
 
   const copy = async () => {
     try {
@@ -431,6 +441,18 @@ export function ResultPanel({
             {result.judge.status === "failed" ? (
               <p role="status" className="m-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
                 Jev judging failed, so this ranking uses deterministic checks only. Reason: {result.judge.reason}
+              </p>
+            ) : null}
+            {refineReport ? (
+              <p role="status" className="m-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+                Refined over {refineReport.rounds.length} {refineReport.rounds.length === 1 ? "round" : "rounds"}
+                {improvedRounds > 0 ? `; ${improvedRounds} ${improvedRounds === 1 ? "round" : "rounds"} beat the previous best` : "; no revision beat the first-pass winner"}
+                {refineReport.stopReason === "perfect_score" ? ". Stopped early at a perfect score." : refineReport.stopReason === "budget_exhausted" ? ". Stopped early at the completion budget." : "."}
+              </p>
+            ) : null}
+            {result.refine.status === "failed" ? (
+              <p role="status" className="m-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+                Refining failed, so this is the first-pass ranking. Reason: {result.refine.reason}
               </p>
             ) : null}
           </div>

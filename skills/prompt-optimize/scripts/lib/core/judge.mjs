@@ -57,6 +57,7 @@ export function buildJudgeRequest(input) {
             input: input.input,
             expectedOutput: input.expectedOutput,
             candidateOutput: input.candidateOutput,
+            ...(input.candidatePrompt === undefined ? {} : { candidatePrompt: input.candidatePrompt }),
             prompt,
         }),
     };

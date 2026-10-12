@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FALLBACK_PATTERNS, REVISE_PROTOCOL, REWRITE_FORMAT_REMINDER, REWRITE_PROTOCOL, buildRewritePrompt } from "@/lib/arc-core/core/index.js";
+import { DEFAULT_REFINE_TEMPERATURE, FALLBACK_PATTERNS, REFINE_PROTOCOL, REVISE_PROTOCOL, REWRITE_FORMAT_REMINDER, REWRITE_PROTOCOL, buildRewritePrompt } from "@/lib/arc-core/core/index.js";
 import type { CompletionAdapter, CompletionRequest, CompletionResult } from "@/lib/arc-core/core/index.js";
 import { COMPLETION_TIMEOUT_MS, SLOW_COMPLETION_TIMEOUT_MS, completionTimeoutMs, runOptimization } from "@/lib/optimize-run";
 import { questionKey } from "@/lib/jev";
@@ -334,6 +334,135 @@ describe("runOptimization", () => {
     );
     expect(questions).toBe(5);
     expect(result.judge.status).toBe("judged");
+  });
+});
+
+/**
+ * Jev stub for the refine loop: the first batch call scores every candidate 1/3 except the last one at 2/3. The
+ * single-candidate calls that follow (one per refined candidate) score 2/3 for round 1, so both revisions tie the
+ * incumbent, then 3/3 for round 2, so the incumbent is finally beaten.
+ */
+function refiningJev(): { fetch: typeof fetch; calls: number[] } {
+  const calls: number[] = [];
+  const legend = { "0": "a", "1": "b", "2": "c", "3": "d" };
+  let singles = 0;
+  const fakeFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { questions: Record<string, unknown> };
+    const keys = Object.keys(body.questions);
+    calls.push(keys.length);
+    if (keys.length === 1) singles += 1;
+    const answers = Object.fromEntries(
+      keys.map((key, index) => {
+        const score = keys.length === 1 ? (singles <= 2 ? 2 : 3) : index === keys.length - 1 ? 2 : 1;
+        return [key, { type: "score", score, confidence: 0.7, probabilities: { [String(score)]: 1 }, legend }];
+      }),
+    );
+    return new Response(JSON.stringify({ model: "jev-test", answers }), { status: 200 });
+  }) as typeof fetch;
+  return { fetch: fakeFetch, calls };
+}
+
+/** Answers refine generations with a distinct revision per call and everything else with a plain output. */
+class RefiningAdapter implements CompletionAdapter {
+  readonly requests: CompletionRequest[] = [];
+  #revisions = 0;
+  async complete(request: CompletionRequest): Promise<CompletionResult> {
+    this.requests.push(request);
+    if (request.prompt.startsWith(REFINE_PROTOCOL)) {
+      this.#revisions += 1;
+      return {
+        text: `<analysis>\n- Too vague.\n</analysis>\n<rewritten_prompt>\nRevision ${this.#revisions}: summarize in 3 bullets.\n</rewritten_prompt>\n<changes>\n1. Change ${this.#revisions}.\n</changes>`,
+        latencyMs: 30,
+        usage: { inputTokens: 500, outputTokens: 60 },
+      };
+    }
+    return { text: `output for ${request.prompt.length} chars`, latencyMs: 10, usage: { inputTokens: 10, outputTokens: 10 } };
+  }
+}
+
+describe("refine", () => {
+  it("iterates on the Jev winner, judges each revision, and ranks the refined candidates with the rest", async () => {
+    const steps: StepEvent[] = [];
+    const jev = refiningJev();
+    const adapter = new RefiningAdapter();
+    const result = await runOptimization(
+      { prompt: "Summarize this.", model: "anthropic/claude-haiku-4-5", judge: true, rewrite: false, refine: { rounds: 2, variants: 2 } },
+      { env: { TYPESAFE_API_KEY: "k" }, signal: new AbortController().signal, emit: (event) => steps.push(event), adapter, fetch: jev.fetch },
+    );
+    expect(steps.map((s) => s.step)).toEqual(expect.arrayContaining(["judge", "refine:1", "refine:2", "rank"]));
+    expect(steps.at(-1)!.step).toBe("rank");
+    expect(steps.find((s) => s.step === "refine:1")).toEqual({ step: "refine:1", improved: false });
+    expect(steps.find((s) => s.step === "refine:2")).toEqual({ step: "refine:2", improved: true });
+    expect(result.refine.status).toBe("refined");
+    if (result.refine.status !== "refined") return;
+    // The first pass is the baseline plus the three task-only patterns; the winner is the last of them (scored 2/3).
+    // Round 1's revisions tie it, so round 2 refines the same incumbent.
+    expect(result.refine.startCandidateId).toBe(result.candidates[3]!.id);
+    expect(result.refine.rounds).toHaveLength(2);
+    expect(result.refine.rounds[0]!.parentCandidateId).toBe(result.refine.startCandidateId);
+    expect(result.refine.rounds[0]!.bestCandidateId).toBe(result.refine.startCandidateId);
+    expect(result.refine.rounds[1]!.parentCandidateId).toBe(result.refine.startCandidateId);
+    expect(result.refine.rounds[1]!.bestCandidateId).toBe(result.refine.bestCandidateId);
+    expect(result.refine.stopReason).toBe("rounds_exhausted");
+    // The second round's prompt lists the revisions that did not beat the incumbent.
+    const secondRoundPrompt = adapter.requests.filter((request) => request.prompt.startsWith(REFINE_PROTOCOL))[2]!.prompt;
+    expect(secondRoundPrompt).toContain("<rejected_revisions>");
+    expect(secondRoundPrompt).toContain("Change 1.");
+    expect(result.candidates).toHaveLength(8);
+    expect(result.candidates.slice(4).every((candidate) => candidate.prompt.pattern === "refine")).toBe(true);
+    expect(result.evaluations).toHaveLength(8);
+    expect(result.ranking).toHaveLength(8);
+    expect(result.ranking[0]!.candidateId).toBe(result.refine.bestCandidateId);
+    expect(result.ranking[0]!.quality.combined).toEqual({ status: "measured", value: 1 });
+    // Jev answers for the refined candidates join the batch answers so the UI can show them.
+    expect(result.judge.status).toBe("judged");
+    if (result.judge.status === "judged") expect(Object.keys(result.judge.answers)).toHaveLength(8);
+    // One batch call for the first pass, then one single-question call per refined candidate.
+    expect(jev.calls).toEqual([4, 1, 1, 1, 1]);
+    // 4 first-pass completions + 2 rounds × 2 × (generation + run).
+    expect(result.completionsUsed).toBe(12);
+    const generations = adapter.requests.filter((request) => request.prompt.startsWith(REFINE_PROTOCOL));
+    expect(generations).toHaveLength(4);
+    expect(generations.every((request) => request.temperature === DEFAULT_REFINE_TEMPERATURE)).toBe(true);
+    expect(generations.every((request) => request.fixtureId === undefined)).toBe(true);
+    expect(generations[0]!.prompt).toContain("output for");
+    expect(adapter.requests.filter((request) => !request.prompt.startsWith(REFINE_PROTOCOL)).every((request) => request.temperature === undefined)).toBe(true);
+  });
+
+  it("reports a failed refine and keeps the first-pass ranking when the judge did not run", async () => {
+    const result = await runOptimization(
+      { prompt: "Summarize this.", model: "anthropic/claude-haiku-4-5", judge: true, rewrite: false, refine: { rounds: 1, variants: 1 } },
+      { env: {}, signal: new AbortController().signal, emit: () => {}, adapter: new RefiningAdapter() },
+    );
+    expect(result.judge.status).toBe("failed");
+    expect(result.refine).toEqual({ status: "failed", reason: "Refine needs Jev scores to iterate on, and the judge did not run." });
+    expect(result.candidates).toHaveLength(4);
+    expect(result.completionsUsed).toBe(4);
+  });
+
+  it("runs end to end on the mock providers used by the smoke test", async () => {
+    const steps: StepEvent[] = [];
+    const result = await runOptimization(
+      { prompt: "Summarize this.", model: "anthropic/claude-haiku-4-5", judge: true, rewrite: true, refine: { rounds: 1, variants: 2 } },
+      { env: { ARC_MOCK_PROVIDERS: "1" }, signal: new AbortController().signal, emit: (event) => steps.push(event) },
+    );
+    expect(steps.map((s) => s.step)).toContain("refine:1");
+    expect(result.refine).toMatchObject({ status: "refined", stopReason: "rounds_exhausted" });
+    if (result.refine.status !== "refined") return;
+    expect(result.refine.rounds[0]!.attempts.map((attempt) => attempt.status)).toEqual(["evaluated", "evaluated"]);
+    expect(result.refine.rounds[0]!.improved).toBe(true);
+    // Both revisions join the first-pass candidates (baseline, rewrite, the plan's patterns, any revision).
+    expect(result.candidates.filter((candidate) => candidate.prompt.pattern === "refine")).toHaveLength(2);
+    expect(result.candidates.length).toBeGreaterThanOrEqual(5);
+    expect(result.ranking[0]!.candidateId).toBe(result.refine.bestCandidateId);
+  }, 15_000);
+
+  it("is not requested by default", async () => {
+    const result = await runOptimization(
+      { prompt: "Summarize this.", model: "openai/gpt-5-mini", judge: false, rewrite: false },
+      { env: {}, signal: new AbortController().signal, emit: () => {}, adapter: new ScriptedAdapter() },
+    );
+    expect(result.refine).toEqual({ status: "not_requested" });
   });
 });
 

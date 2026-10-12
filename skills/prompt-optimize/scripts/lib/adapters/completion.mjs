@@ -193,7 +193,7 @@ function validateUsage(value) {
 }
 function validateCompletionRequest(request) {
     const record = expectRecord(request, "INVALID_EVALUATION", "Completion request");
-    rejectUnknownKeys(record, ["fixtureId", "model", "prompt", "maxOutputCharacters"], "INVALID_EVALUATION", "Completion request");
+    rejectUnknownKeys(record, ["fixtureId", "model", "prompt", "maxOutputCharacters", "temperature"], "INVALID_EVALUATION", "Completion request");
     const fixtureId = readOwnField(record, "fixtureId");
     if (fixtureId !== undefined && typeof fixtureId !== "string") {
         throw new CoreValidationError("INVALID_EVALUATION", "Completion request fixtureId must be a string when present.");
@@ -216,15 +216,28 @@ function validateCompletionRequest(request) {
     }
     if (requestedOutputLimit !== undefined)
         outputLimit = requestedOutputLimit;
+    const temperature = validateTemperature(readOwnField(record, "temperature"), "Completion request temperature");
     return {
         request: normalizeKnownFields([
             ["fixtureId", fixtureId],
             ["model", model],
             ["prompt", prompt],
             ["maxOutputCharacters", requestedOutputLimit],
+            ["temperature", temperature],
         ]),
         outputLimit,
     };
+}
+/** Sampling temperatures outside this range are rejected rather than clamped. */
+export const MAX_COMPLETION_TEMPERATURE = 2;
+/** Validates an optional sampling temperature: a finite number in [0, MAX_COMPLETION_TEMPERATURE]. */
+export function validateTemperature(value, label) {
+    if (value === undefined)
+        return undefined;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > MAX_COMPLETION_TEMPERATURE) {
+        throw new CoreValidationError("INVALID_EVALUATION", `${label} must be a finite number between 0 and ${MAX_COMPLETION_TEMPERATURE}.`);
+    }
+    return value;
 }
 /** Returns a validated request containing only the provider-neutral own data fields. */
 export function normalizeCompletionRequest(request) {
