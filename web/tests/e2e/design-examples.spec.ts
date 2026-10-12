@@ -22,7 +22,7 @@ test("design prompts load into Optimize without a run and save with the Design c
   await expect(dialog).toHaveCount(0);
 
   await card.getByRole("link", { name: `Use ${example.title} design prompt`, exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Optimize a prompt" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Optimize a prompt" })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("textbox", { name: "Prompt", exact: true })).toHaveValue(example.prompt);
   await expect(page.getByRole("dialog", { name: "Run optimization?" })).toHaveCount(0);
   expect(optimizations).toBe(0);

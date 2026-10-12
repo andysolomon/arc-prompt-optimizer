@@ -7,8 +7,10 @@ import { candidateCount, MAX_PROMPT_CHARACTERS } from "@/lib/types";
 
 describe("design examples", () => {
   it("covers every design group with complete, loadable prompts", () => {
-    expect(DESIGN_EXAMPLES.length).toBeGreaterThanOrEqual(8);
+    expect(DESIGN_EXAMPLES).toHaveLength(50);
+    expect(DESIGN_EXAMPLES.map((example) => example.number)).toEqual(Array.from({ length: 50 }, (_, index) => index + 1));
     expect(new Set(DESIGN_EXAMPLES.map((example) => example.id)).size).toBe(DESIGN_EXAMPLES.length);
+    expect(new Set(DESIGN_EXAMPLES.map((example) => example.title)).size).toBe(DESIGN_EXAMPLES.length);
     expect(new Set(DESIGN_EXAMPLES.map((example) => example.group))).toEqual(new Set(Object.keys(DESIGN_GROUPS)));
     for (const example of DESIGN_EXAMPLES) {
       expect(example.id).toMatch(/^[a-z0-9-]+$/u);
