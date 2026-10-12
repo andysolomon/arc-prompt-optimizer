@@ -249,6 +249,8 @@ export async function runOptimization(request: OptimizeRequest, options: RunOpti
       timeoutMs: REWRITE_TIMEOUT_MS,
       totalTimeoutMs: Math.min(REWRITE_TOTAL_TIMEOUT_MS, budgetMs),
       signal: options.signal,
+      ...(request.context === undefined ? {} : { context: request.context }),
+      ...(request.useCase === undefined ? {} : { useCase: request.useCase }),
     });
     completionsUsed += outcome.attempts;
     if (outcome.status === "rewritten") {

@@ -6,7 +6,7 @@ import { streamOptimize } from "@/lib/client/sse";
 import { defaultSelectionId } from "@/lib/client/selection";
 import { advanceSteps, planSteps, type StepState } from "@/lib/client/steps";
 import { modelLabel } from "@/lib/models";
-import { MAX_PROMPT_CHARACTERS, type ModelInfo, type ModelsResponse, type OptimizeResult } from "@/lib/types";
+import { MAX_PROMPT_CHARACTERS, MAX_REWRITE_DETAIL_CHARACTERS, type ModelInfo, type ModelsResponse, type OptimizeResult } from "@/lib/types";
 
 const SESSION_KEY = "arc-po-session";
 /** The model rewrites every prompt before the run; the API also accepts `rewrite: false`. */
@@ -16,6 +16,8 @@ type Phase = "idle" | "confirm" | "running" | "done";
 
 interface PersistedSession {
   prompt: string;
+  context: string;
+  useCase: string;
   model: string;
   judge: boolean;
   result: OptimizeResult | null;
@@ -30,6 +32,8 @@ function loadSession(): PersistedSession | undefined {
     const parsed = JSON.parse(raw) as Partial<PersistedSession>;
     return {
       prompt: typeof parsed.prompt === "string" ? parsed.prompt : "",
+      context: typeof parsed.context === "string" ? parsed.context : "",
+      useCase: typeof parsed.useCase === "string" ? parsed.useCase : "",
       model: typeof parsed.model === "string" ? parsed.model : "",
       judge: typeof parsed.judge === "boolean" ? parsed.judge : true,
       // Results saved by earlier versions lack the rewrite, plan, revision, and loop reports.
@@ -53,6 +57,8 @@ function loadSession(): PersistedSession | undefined {
 function useSessionState() {
   const [hydrated, setHydrated] = useState(false);
   const [prompt, setPrompt] = useState("");
+  const [context, setContext] = useState("");
+  const [useCase, setUseCase] = useState("");
   const [model, setModel] = useState("");
   const [judge, setJudge] = useState(true);
   const [models, setModels] = useState<readonly ModelInfo[]>([]);
@@ -70,6 +76,8 @@ function useSessionState() {
     const session = loadSession();
     if (session) {
       setPrompt(session.prompt);
+      setContext(session.context);
+      setUseCase(session.useCase);
       setModel(session.model);
       setJudge(session.judge);
       setResult(session.result);
@@ -83,12 +91,12 @@ function useSessionState() {
   useEffect(() => {
     if (!hydrated) return;
     try {
-      const session: PersistedSession = { prompt, model, judge, result, selectedId, edited };
+      const session: PersistedSession = { prompt, context, useCase, model, judge, result, selectedId, edited };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
     } catch {
       /* storage unavailable or full */
     }
-  }, [hydrated, prompt, model, judge, result, selectedId, edited]);
+  }, [hydrated, prompt, context, useCase, model, judge, result, selectedId, edited]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -119,7 +127,8 @@ function useSessionState() {
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   const trimmedEmpty = prompt.trim().length === 0;
-  const canRun = !trimmedEmpty && prompt.length <= MAX_PROMPT_CHARACTERS && phase !== "running" && model !== "";
+  const detailsWithinLimit = context.length <= MAX_REWRITE_DETAIL_CHARACTERS && useCase.length <= MAX_REWRITE_DETAIL_CHARACTERS;
+  const canRun = !trimmedEmpty && prompt.length <= MAX_PROMPT_CHARACTERS && detailsWithinLimit && phase !== "running" && model !== "";
   const effectiveJudge = judge && judgeAvailable;
   const currentModelLabel = modelLabel(model);
 
@@ -153,7 +162,14 @@ function useSessionState() {
     setEdited({});
     try {
       const next = await streamOptimize(
-        { prompt, model: model as OptimizeResult["model"], judge: judgeForRun, rewrite: REWRITE },
+        {
+          prompt,
+          model: model as OptimizeResult["model"],
+          judge: judgeForRun,
+          rewrite: REWRITE,
+          ...(context.trim() === "" ? {} : { context }),
+          ...(useCase.trim() === "" ? {} : { useCase }),
+        },
         controller.signal,
         (event) => {
           if (!controller.signal.aborted) setStepState((state) => advanceSteps(state, event));
@@ -172,13 +188,17 @@ function useSessionState() {
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null;
     }
-  }, [effectiveJudge, model, prompt]);
+  }, [context, effectiveJudge, model, prompt, useCase]);
 
   return {
     hydrated,
     loadExample,
     prompt,
     setPrompt,
+    context,
+    setContext,
+    useCase,
+    setUseCase,
     model,
     setModel,
     judge,

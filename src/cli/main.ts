@@ -17,7 +17,16 @@ import { hasFlag, integerFlag, parseArgs, singleFlag, type ParsedArgs } from "./
 import { listDefaultPiModels, selectAdapter } from "./adapters.js";
 import { CliError } from "./errors.js";
 import { evaluateCandidatesBounded } from "./evaluate.js";
-import { CANDIDATES_HELP, SCORE_HELP, commandCandidates, commandScore } from "./harness-main.js";
+import {
+  CANDIDATES_HELP,
+  REWRITE_CANDIDATE_HELP,
+  REWRITE_PROMPT_HELP,
+  SCORE_HELP,
+  commandCandidates,
+  commandRewriteCandidate,
+  commandRewritePrompt,
+  commandScore,
+} from "./harness-main.js";
 import {
   MAX_CLI_PROMPT_CHARACTERS,
   type CliIo,
@@ -58,6 +67,8 @@ Commands:
   models     List available models.
   candidates Print the baseline and pattern prompt candidates (no model calls).
   score      Score harness-produced candidate outputs deterministically (no model calls).
+  rewrite-prompt    Print the meta-prompt that asks a model to rewrite a draft (no model calls).
+  rewrite-candidate Parse a model's rewrite reply into a candidate for 'score' (no model calls).
 
 Common options:
   --json                    Emit canonical JSON.
@@ -136,6 +147,8 @@ Options:
 `,
   candidates: CANDIDATES_HELP,
   score: SCORE_HELP,
+  "rewrite-prompt": REWRITE_PROMPT_HELP,
+  "rewrite-candidate": REWRITE_CANDIDATE_HELP,
 };
 
 function defaultIo(): CliIo {
@@ -334,6 +347,10 @@ export async function runCli(options: RunCliOptions = {}): Promise<number> {
         return await commandCandidates(args, io);
       case "score":
         return await commandScore(args, io);
+      case "rewrite-prompt":
+        return await commandRewritePrompt(args, io);
+      case "rewrite-candidate":
+        return await commandRewriteCandidate(args, io);
     }
   } catch (error) {
     if (error instanceof CliError) {

@@ -3,6 +3,7 @@ import { CoreValidationError } from "../core/errors.mjs";
 import { MAX_EVALUATION_CANDIDATES, MAX_EVALUATION_COMPLETIONS, MAX_EVALUATION_PROMPT_CHARACTERS, aggregateCases, evaluateOutput, measureCompletion, } from "../core/evaluation.mjs";
 import { buildPreviewCandidates } from "../core/preview.mjs";
 import { DEFAULT_RANKING_OBJECTIVE, rankCandidates } from "../core/ranking.mjs";
+import { buildRewritePrompt, parseRewriteOutput, rewriteCandidate } from "../core/rewrite.mjs";
 import { expectDenseArray, expectRecord, expectString, hasOwnField, readOwnField, rejectUnknownKeys } from "../core/validation.mjs";
 /**
  * Model-free, harness-neutral tools. This module must not import Pi or any completion adapter: the calling harness
@@ -14,13 +15,37 @@ function candidateLabel(candidate) {
     const label = candidate.metadata?.["label"];
     return typeof label === "string" ? label : candidate.prompt.pattern;
 }
-export function harnessCandidates(prompt) {
-    return Object.freeze(buildPreviewCandidates(prompt).map((candidate) => Object.freeze({
+function candidateView(candidate) {
+    return Object.freeze({
         id: candidate.id,
         pattern: candidate.prompt.pattern,
         label: candidateLabel(candidate),
         prompt: candidate.prompt.text,
-    })));
+    });
+}
+export function harnessCandidates(prompt) {
+    return Object.freeze(buildPreviewCandidates(prompt).map(candidateView));
+}
+/** The rewrite meta-prompt for the harness's own model to answer; no model call is made here. */
+export function harnessRewritePrompt(prompt, inputs = {}) {
+    return buildRewritePrompt(prompt, inputs);
+}
+/**
+ * Turns the harness model's reply to {@link harnessRewritePrompt} into a `rewrite-<fingerprint>` candidate whose
+ * id `scoreHarnessOutputs` accepts next to the preview candidates. An unparseable reply is reported, never guessed.
+ */
+export function harnessRewriteCandidate(prompt, reply) {
+    const parsed = parseRewriteOutput(reply);
+    if (parsed.status === "invalid")
+        return Object.freeze({ status: "invalid", reason: parsed.reason });
+    return Object.freeze({
+        status: "parsed",
+        value: Object.freeze({
+            candidate: candidateView(rewriteCandidate(prompt, parsed.rewrittenPrompt)),
+            analysis: parsed.analysis,
+            changes: parsed.changes,
+        }),
+    });
 }
 function validateMeasurement(value, label) {
     const record = expectRecord(value, "INVALID_EVALUATION", label);

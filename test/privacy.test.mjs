@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
-import { MAX_COMPLETION_OUTPUT_CHARACTERS, outputCharacterLimitToMaxTokens } from "../dist/core/index.js";
+import { MAX_COMPLETION_OUTPUT_CHARACTERS, REWRITE_PROTOCOL, outputCharacterLimitToMaxTokens } from "../dist/core/index.js";
 import {
   MAX_EXTENSION_PROMPT_CHARACTERS,
   REVIEW_SELECT_TITLE,
@@ -55,7 +55,14 @@ test("the extension registers no event handlers, tools, shortcuts, or flags that
 
 const MODEL = Object.freeze({ provider: "fake", id: "model-a", maxTokens: 4096 });
 
-function fakeRegistry(reply = (prompt) => `echo: ${prompt}`) {
+/** Echoes every prompt; the rewrite meta-prompt gets a tagged reply whose rewritten prompt echoes the fenced draft. */
+function echoReply(prompt) {
+  if (!prompt.startsWith(REWRITE_PROTOCOL)) return `echo: ${prompt}`;
+  const draft = /(`{3,})\n([\s\S]*?)\n\1/u.exec(prompt.slice(REWRITE_PROTOCOL.length))?.[2] ?? "";
+  return `<analysis>\n- echo\n</analysis>\n<rewritten_prompt>\nrewritten: ${draft}\n</rewritten_prompt>\n<changes>\n1. echo\n</changes>`;
+}
+
+function fakeRegistry(reply = echoReply) {
   const calls = [];
   return {
     calls,
@@ -131,7 +138,8 @@ test("an over-limit prompt is refused before any confirmation or completion", as
 test("preview completions request a bounded output and over-limit replies fail without touching the editor", async () => {
   const bounded = commandContext();
   await runPromptOptimizeCommand("Explain closures.", bounded.ctx, deps);
-  assert.equal(bounded.registry.calls.length, 4);
+  // One rewrite completion, then the baseline, the rewrite, and three pattern candidates.
+  assert.equal(bounded.registry.calls.length, 6);
   const expectedMaxTokens = outputCharacterLimitToMaxTokens(MAX_COMPLETION_OUTPUT_CHARACTERS, MODEL);
   for (const call of bounded.registry.calls) {
     assert.equal(call.options.maxTokens, expectedMaxTokens);
@@ -142,7 +150,7 @@ test("preview completions request a bounded output and over-limit replies fail w
   const { ctx, events, registry } = commandContext({ registry: fakeRegistry(() => oversized) });
   const outcome = await runPromptOptimizeCommand("Explain closures.", ctx, deps);
   assert.equal(outcome.status, "failed");
-  assert.equal(registry.calls.length, 1, "the run stops at the first over-limit reply");
+  assert.equal(registry.calls.length, 2, "an over-limit rewrite reply is skipped; the run stops at the first over-limit candidate reply");
   assert.equal(events.some((event) => event.name === "setEditorText"), false);
   assert.ok(reported(events).every((message) => !message.includes(oversized.slice(0, 64))));
 });

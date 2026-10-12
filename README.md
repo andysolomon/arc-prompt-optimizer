@@ -18,7 +18,7 @@ The `prompt-optimize` skill works in any agent harness that loads [Agent Skills]
 /prompt-optimize Summarize this incident report for executives.
 ```
 
-The plugin provides the `prompt-optimize` skill, which Claude can also pick on its own when you ask it to improve a prompt, and a `/prompt-optimize <prompt>` command.
+The plugin provides the `prompt-optimize` skill, which Claude can also pick on its own when you ask it to improve a prompt, and a `/prompt-optimize <prompt>` command. The skill first has the agent rewrite the prompt with the rewrite protocol (a specific role, an explicit output format, constraints, and examples), then compares that rewrite against the original and three pattern variants.
 
 **Other skills-capable harnesses**
 
@@ -32,13 +32,13 @@ ln -s "$PWD/arc-prompt-optimizer/skills/prompt-optimize" ~/.codex/skills/prompt-
 
 **Pi**
 
-A Pi install (see [Pi package](#pi-package)) provides both the native `/prompt-optimize` extension, which runs candidates through a Pi model you pick, and the same skill through the `pi.skills` manifest.
+A Pi install (see [Pi package](#pi-package)) provides both the native `/prompt-optimize` extension, which asks a Pi model you pick to rewrite the prompt and then runs the rewrite and the pattern candidates through it, and the same skill through the `pi.skills` manifest.
 
 **Plain CLI**
 
-`arc-prompt candidates` and `arc-prompt score` are the same model-free commands, for scripts or harnesses without skills support. Run `arc-prompt candidates --help` and `arc-prompt score --help` for flags and the outputs JSON schema.
+`arc-prompt candidates`, `arc-prompt rewrite-prompt`, `arc-prompt rewrite-candidate`, and `arc-prompt score` are the same model-free commands, for scripts or harnesses without skills support. Run `arc-prompt <command> --help` for flags and the JSON schemas.
 
-The harness workflow has trade-offs. The same agent writes the variants and produces their outputs, scores come from deterministic checks only, the default preview suite only checks that outputs are non-empty, and latency, tokens, and cost stay unknown unless the harness reports them. See [docs/user-guide.md](docs/user-guide.md#harness-agnostic-workflow).
+The harness workflow has trade-offs. The same agent writes the rewrite and the variants and produces their outputs, scores come from deterministic checks only, the default preview suite only checks that outputs are non-empty, and latency, tokens, and cost stay unknown unless the harness reports them. See [docs/user-guide.md](docs/user-guide.md#harness-agnostic-workflow).
 
 ### Web app
 

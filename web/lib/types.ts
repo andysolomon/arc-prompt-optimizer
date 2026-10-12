@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DEFAULT_REWRITE_ATTEMPTS, MAX_PLAN_PATTERNS, TASK_TYPES } from "@/lib/arc-core/core/index.js";
+import { DEFAULT_REWRITE_ATTEMPTS, MAX_PLAN_PATTERNS, MAX_REWRITE_INPUT_CHARACTERS, TASK_TYPES } from "@/lib/arc-core/core/index.js";
 import type {
   CandidateEvaluation,
   PromptCandidate,
@@ -33,6 +33,17 @@ export const MODEL_IDS = [
 export type ModelId = (typeof MODEL_IDS)[number];
 
 export const MAX_PROMPT_CHARACTERS = 16_384;
+/** Largest optional task context or target use case sent to the rewrite; matches the core's limit. */
+export const MAX_REWRITE_DETAIL_CHARACTERS = MAX_REWRITE_INPUT_CHARACTERS;
+
+/** Optional free text for the rewrite; blank values are dropped so the meta-prompt omits the section. */
+function rewriteDetail(label: string) {
+  return z
+    .string({ error: `${label} must be a string.` })
+    .max(MAX_REWRITE_DETAIL_CHARACTERS, { error: `${label} must be at most ${MAX_REWRITE_DETAIL_CHARACTERS.toLocaleString("en-US")} characters.` })
+    .transform((value) => (value.trim().length === 0 ? undefined : value.trim()))
+    .optional();
+}
 
 /** Revision rounds of the lesson's optimization loop after the first rewrite: score, revise the weakest checks, re-run. */
 export const MAX_REVISION_ROUNDS = 2;
@@ -77,6 +88,10 @@ export const optimizeRequestSchema = z.object({
   judge: z.boolean({ error: "judge must be a boolean." }),
   /** Ask the model to rewrite the prompt first and rank the rewrite as an extra candidate. Defaults to true. */
   rewrite: z.boolean({ error: "rewrite must be a boolean." }).default(true),
+  /** Where the prompt runs and what it works on; given to the rewrite only. */
+  context: rewriteDetail("context"),
+  /** What the output is for and who reads it; given to the rewrite only. */
+  useCase: rewriteDetail("useCase"),
 });
 
 export type OptimizeRequest = z.infer<typeof optimizeRequestSchema>;

@@ -3,7 +3,7 @@ import type { Measurement } from "../core/index.js";
 import { PromptOptimizeUnsupportedModeError, promptOptimizeModeSupport } from "./modes.js";
 import { resolveTargetModel, type TargetModel, type TargetModelContext } from "./models.js";
 import { runWithProgress, type ProgressContext, type ProgressOptions } from "./progress.js";
-import { PREVIEW_COMPLETION_COUNT, runPreview, type PreviewRunOptions, type PreviewRunResult } from "./run.js";
+import { REWRITE_PREVIEW_COMPLETION_COUNT, runPreview, type PreviewRunOptions, type PreviewRunResult } from "./run.js";
 import { reviewCandidates, type ReviewContext } from "./review.js";
 import { resolvePromptSource, type PromptSource, type PromptSourceContext } from "./source.js";
 
@@ -58,7 +58,11 @@ export function formatRankingSummary(result: PreviewRunResult, model: TargetMode
     (ranked) =>
       `${ranked.rank}. ${candidateLabel(result, ranked.candidateId)}: score ${formatMeasurement(ranked.quality.combined, (value) => value.toFixed(2))}, latency ${formatMeasurement(ranked.operational.latencyMs, (value) => `${Math.round(value)}ms`)}`,
   );
-  return [`/prompt-optimize ranked ${result.candidates.length} candidates on ${model.reference} (${result.completionsUsed} completions):`, ...lines].join("\n");
+  const header = `/prompt-optimize ranked ${result.candidates.length} candidates on ${model.reference} (${result.completionsUsed} completions):`;
+  // The rewrite's analysis and change notes are model output, so they stay out of notify/status (see test/privacy.test.mjs);
+  // the review step shows the rewritten prompt itself.
+  const rewrite = result.rewrite.status === "failed" ? [`The rewrite step failed (${result.rewrite.reason}); the ranking has no rewrite candidate.`] : [];
+  return [header, ...lines, ...rewrite].join("\n");
 }
 
 function errorMessage(error: unknown): string {
@@ -91,7 +95,7 @@ export async function runPromptOptimizeCommand(
 
   const confirmed = await ctx.ui.confirm(
     "Run /prompt-optimize?",
-    `This evaluates ${PREVIEW_COMPLETION_COUNT} prompt candidates from the ${source.label} with ${model.reference}: ${PREVIEW_COMPLETION_COUNT} model completions, which may incur cost.`,
+    `This asks ${model.reference} to rewrite the prompt from the ${source.label}, then evaluates the baseline, the rewrite, and three pattern candidates with it: up to ${REWRITE_PREVIEW_COMPLETION_COUNT} model completions, which may incur cost.`,
   );
   if (!confirmed) {
     ctx.ui.notify("/prompt-optimize cancelled; no model calls were made.", "info");
@@ -101,7 +105,7 @@ export async function runPromptOptimizeCommand(
   const run = deps.runPreview ?? runPreview;
   const progress = await runWithProgress(
     ctx,
-    `Evaluating ${PREVIEW_COMPLETION_COUNT} prompt candidates with ${model.reference}...`,
+    `Rewriting and evaluating prompt candidates with ${model.reference} (up to ${REWRITE_PREVIEW_COMPLETION_COUNT} completions)...`,
     (signal) =>
       run({
         prompt: source.text,

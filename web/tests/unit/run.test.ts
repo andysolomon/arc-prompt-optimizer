@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FALLBACK_PATTERNS, REVISE_PROTOCOL, REWRITE_FORMAT_REMINDER, REWRITE_PROTOCOL } from "@/lib/arc-core/core/index.js";
+import { FALLBACK_PATTERNS, REVISE_PROTOCOL, REWRITE_FORMAT_REMINDER, REWRITE_PROTOCOL, buildRewritePrompt } from "@/lib/arc-core/core/index.js";
 import type { CompletionAdapter, CompletionRequest, CompletionResult } from "@/lib/arc-core/core/index.js";
 import { COMPLETION_TIMEOUT_MS, SLOW_COMPLETION_TIMEOUT_MS, completionTimeoutMs, runOptimization } from "@/lib/optimize-run";
 import { questionKey } from "@/lib/jev";
@@ -163,6 +163,17 @@ describe("runOptimization", () => {
     expect(result.ranking.every((r) => r.quality.combined.status === "measured" && r.quality.combined.value === 1)).toBe(true);
     expect(result.revisions).toEqual([]);
     expect(result.loop).toEqual({ rounds: 0, stoppedBecause: "all_checks_passed" });
+  });
+
+  it("passes the task context and target use case to the rewrite meta-prompt only", async () => {
+    const adapter = new RewritingAdapter();
+    await runOptimization(
+      { prompt: "Summarize this.", model: "openai/gpt-5-mini", judge: false, rewrite: true, context: "Reports are markdown.", useCase: "Exec email" },
+      { env: {}, signal: new AbortController().signal, emit: () => {}, adapter },
+    );
+    expect(adapter.prompts[0]).toBe(buildRewritePrompt("Summarize this.", { context: "Reports are markdown.", useCase: "Exec email" }));
+    expect(adapter.prompts[0]).toContain("Target use case:\n```\nExec email\n```");
+    expect(adapter.prompts.slice(1).some((prompt) => prompt.includes("Exec email"))).toBe(false);
   });
 
   it("revises the rewrite for the checks it failed, runs the revision, and ranks it", async () => {

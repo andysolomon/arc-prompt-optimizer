@@ -192,9 +192,9 @@ export class MockCompletionAdapter implements CompletionAdapter {
   }
 }
 
-/** Canned reply to the rewrite meta-prompt: wraps the fenced draft in a role, format, and constraints, with a plan. */
+/** Canned reply to the rewrite meta-prompt: wraps the fenced draft (the first fence after the protocol) in a role, format, and constraints, with a plan. */
 function mockRewriteReply(metaPrompt: string): string {
-  const fenced = /(`{3,})\n([\s\S]*)\n\1$/u.exec(metaPrompt);
+  const fenced = /^\n(`{3,})\n([\s\S]*?)\n\1(?:\n\n|$)/u.exec(metaPrompt.slice(REWRITE_PROTOCOL.length));
   const draft = fenced?.[2] ?? "";
   const plan = {
     task_type: "summarization",
