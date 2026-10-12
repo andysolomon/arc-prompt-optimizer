@@ -96,9 +96,11 @@ export async function runPreview(options: PreviewRunOptions): Promise<PreviewRun
     const outcome = await rewritePrompt(adapter, options.prompt, {
       model: options.model,
       timeoutMs: REWRITE_COMPLETION_TIMEOUT_MS,
+      // One attempt only, so the preview never exceeds the completion count the confirmation promised.
+      maxAttempts: 1,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
-    rewriteCompletions = 1;
+    rewriteCompletions = outcome.attempts;
     if (outcome.status === "rewritten") {
       candidates = Object.freeze([preview[0]!, outcome.candidate, ...preview.slice(1)]);
       rewrite = Object.freeze({ status: "rewritten", candidateId: outcome.candidate.id, analysis: outcome.analysis, changes: outcome.changes });

@@ -2,5 +2,7 @@ allowBuilds:
   esbuild: true
   sharp: true
   unrs-resolver: true
+  # Pulled in by @clerk/ui; its postinstall only prints a funding notice.
+  core-js: false
 # Mirror the default supply-chain policy Vercel applies so a failing lockfile is caught locally.
 minimumReleaseAge: 1440

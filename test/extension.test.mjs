@@ -457,7 +457,7 @@ test("a failed rewrite is reported in the summary and the run ranks the remainin
   assert.equal(registry.calls.length, 5);
   const summary = events.filter((event) => event.name === "notify").at(-1);
   assert.match(summary.args[0], /ranked 4 candidates .* \(5 completions\)/u);
-  assert.match(summary.args[0], /The rewrite step failed \(rewrite reply has no complete <rewritten_prompt> section\)/u);
+  assert.match(summary.args[0], /The rewrite step failed \(rewrite reply has no complete <rewritten_prompt> section or 'Rewritten prompt' heading\)/u);
   assertNoForbiddenCalls(events);
 });
 

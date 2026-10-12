@@ -393,7 +393,7 @@ test("rewrite-candidate parses a reply from a file or stdin into a candidate tha
 test("rewrite-candidate rejects an unparseable reply, a missing draft, and ambiguous sources", async () => {
   const invalid = await run(["rewrite-candidate", "--prompt", PROMPT], { stdin: "Here is a better prompt: be specific." });
   assert.equal(invalid.code, 2);
-  assert.match(invalid.stderr, /^INVALID_REWRITE_REPLY: rewrite reply has no complete <rewritten_prompt> section\./u);
+  assert.match(invalid.stderr, /^INVALID_REWRITE_REPLY: rewrite reply has no complete <rewritten_prompt> section/u);
   const noDraft = await run(["rewrite-candidate"], { stdin: REPLY });
   assert.equal(noDraft.code, 2);
   assert.match(noDraft.stderr, /^MISSING_INPUT: Provide the draft prompt from --prompt or --prompt-file\./u);

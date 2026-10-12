@@ -203,25 +203,27 @@ Every prompt is length-checked before the first completion runs.
 - **Harness-produced scores are deterministic checks on agent-written outputs.** `arc-prompt score` and the skill tool never call a model. See [Harness-agnostic workflow](#harness-agnostic-workflow) for trade-offs.
 - **The `/prompt-optimize` preview ranking is mostly operational.** Its built-in suite has one case whose only criterion is `minCharacters: 1` (non-empty output). Any non-empty reply scores 1, so ranking falls through to tokens, latency, and cost. Treat the review step as a side-by-side reading aid, not a quality verdict. The rewrite candidate is the one whose text actually changes; the pattern variants wrap the original.
 
-## Model rewrite
+## Model rewrite and revision (library)
 
-`rewritePrompt(adapter, prompt, options)` asks a model to rewrite a draft prompt before it is compared, which is the step the three pattern templates cannot do on their own: they only wrap your words, while the rewrite adds a specific role, an explicit output format, positive, negative, and conditional constraints, and examples where the format matters.
+`rewritePrompt(adapter, prompt, options)` asks a model to rewrite a draft prompt before it is compared, which is the step the three pattern templates cannot do on their own: they only wrap your words, while the rewrite adds a specific role, an explicit output format, positive, negative, and conditional constraints, and examples where the format matters. The same reply carries a plan: the task type, a suggested temperature, objective criteria any good answer must satisfy, and the catalog patterns worth trying for the task.
 
-- It makes exactly one completion through the `CompletionAdapter` you pass, with the same `model`, `timeoutMs`, and `signal` options as an evaluation. It is explicit generation: nothing calls it automatically.
+- It makes one completion through the `CompletionAdapter` you pass, with the same `model`, `timeoutMs`, and `signal` options as an evaluation, and retries once with a format reminder when the reply cannot be parsed (`maxAttempts`, default 2, caps the total). It is explicit generation: nothing calls it automatically. The outcome's `attempts` counts the completions spent.
 - `options.context` (where the prompt runs and what it works on) and `options.useCase` (what the output is for and who reads it) are optional, at most 4,096 characters each, and are appended to the meta-prompt as fenced sections after the draft. The model is told they describe the situation and are not part of the prompt to rewrite. Blank values are omitted. `buildRewritePrompt(draft, { context, useCase })` builds the same meta-prompt without a model call.
-- The reply must contain `<analysis>`, `<rewritten_prompt>`, and `<changes>` sections. The last complete `<rewritten_prompt>` section wins, so reasoning that mentions the tags is ignored. A missing or empty section is reported as `invalid`, never guessed.
-- On success it returns a `rewrite-<fingerprint>` candidate with origin `explicit_generation` and the baseline as its parent, ready to evaluate next to `buildPreviewCandidates`, plus the weakness and change notes and the completion's measurements.
+- The reply should contain `<analysis>`, `<rewritten_prompt>`, `<changes>`, and `<plan>` sections. The last complete `<rewritten_prompt>` section wins, so reasoning that mentions the tags is ignored; a reply that uses markdown headings such as `## Rewritten Prompt` instead is accepted as a fallback. A missing or empty prompt is reported as `invalid`, never guessed, and a reply cut off at the output limit says so in the reason.
+- On success it returns a `rewrite-<fingerprint>` candidate with origin `explicit_generation` and the baseline as its parent, ready to evaluate next to `buildPreviewCandidates`, plus the weakness and change notes, the parsed `plan` when the reply had one, and the completion's measurements.
 - Adapter errors and timeouts return `failed`; cancellation is rethrown so the caller's run stops.
 - The model is told to keep the draft's intent and facts, not to invent data, and to leave one delimited slot for any material the draft refers to but does not include.
 
-Where it runs:
+`parseRewritePlan`, `planSuite`, and `planPatternSpecs` turn the plan into an evaluation suite (word limits, expected format, required keywords, forbidden phrases, each weight 1, plus the non-empty check) and into candidate specs for the chosen patterns, with the draft as each pattern's task and the lesson's task-type matrix (`PATTERN_MATRIX`) as the fallback. `revisePrompt(adapter, { draft, candidate, round, output, checks }, options)` is one step of the lesson's optimization loop: given the checks a candidate's output failed, it asks the model to revise the prompt for them and returns a `rewrite-v<round>-<fingerprint>` candidate whose parent is the candidate revised, with the same retry and error handling as the rewrite.
+
+Where the rewrite runs:
 
 - The `prompt-optimize` skill runs it through the agent's own model with the `rewrite-prompt` and `rewrite-candidate` tool commands (see [Harness-agnostic workflow](#harness-agnostic-workflow)), which is where task context and use case can be supplied from the conversation.
 - The Pi extension's `/prompt-optimize` runs it first, so the preview compares the baseline, the rewrite, and the three pattern variants (up to 6 completions). A failed or unparseable rewrite is reported in the ranking summary and the preview continues with the four other candidates. The extension takes no context or use case: it only has the prompt from the command, editor, or last message.
-- The web app in `web/` runs it with optional "Rewrite details" fields for context and use case.
+- The web app in `web/` runs it with optional "Rewrite details" fields for context and use case, and is the only entry point that uses the plan and the revision loop so far.
 - `arc-prompt optimize` and `arc-prompt evaluate` do not run it; they take a suite and the three pattern variants only.
 
-The protocol is adapted from the prompt optimizer in [AI Engineering from Scratch](https://github.com/rohitg00/ai-engineering-from-scratch) under the MIT License; see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+The protocols and the matrix are adapted from the prompt optimizer and pattern guide in [AI Engineering from Scratch](https://github.com/rohitg00/ai-engineering-from-scratch) under the MIT License; see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
 ## Model selection
 

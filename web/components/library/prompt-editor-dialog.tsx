@@ -11,10 +11,14 @@ import { PROMPT_CATEGORIES, categoryLabel, categorySuggestionSchema, MAX_SAVED_P
 
 export const INPUT_CLASS = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-export function PromptEditorDialog({ open, onOpenChange, initialPrompt = "", saved }: {
+export function PromptEditorDialog({ open, onOpenChange, initialPrompt = "", initialTitle, initialCategory = "uncategorized", saved }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialPrompt?: string;
+  /** Title for a new prompt; defaults to the prompt's first line. Ignored when editing a saved one. */
+  initialTitle?: string;
+  /** Preselected category for a new prompt; ignored when editing a saved one. */
+  initialCategory?: SavedCategory;
   saved?: SavedPrompt;
 }) {
   const library = usePromptLibrary();
@@ -29,14 +33,14 @@ export function PromptEditorDialog({ open, onOpenChange, initialPrompt = "", sav
 
   useEffect(() => {
     if (open) {
-      setTitle(saved?.title ?? initialPrompt.trim().split("\n")[0]?.slice(0, 120) ?? "");
+      setTitle(saved?.title ?? initialTitle ?? initialPrompt.trim().split("\n")[0]?.slice(0, 120) ?? "");
       setPrompt(saved?.prompt ?? initialPrompt);
-      setCategory(saved?.category ?? "uncategorized");
+      setCategory(saved?.category ?? initialCategory);
       setSuggestion(saved?.suggestion);
       setFailure(null);
     }
     return () => { controllerRef.current?.abort(); controllerRef.current = null; setBusy(false); };
-  }, [open, initialPrompt, saved]);
+  }, [open, initialPrompt, initialTitle, initialCategory, saved]);
 
   const suggest = async () => {
     const controller = new AbortController();
@@ -104,11 +108,11 @@ export function PromptEditorDialog({ open, onOpenChange, initialPrompt = "", sav
   );
 }
 
-export function SavePromptButton({ prompt }: { prompt: string }) {
+export function SavePromptButton({ prompt, title, category }: { prompt: string; title?: string; category?: SavedCategory }) {
   const [open, setOpen] = useState(false);
   const { ready, error } = usePromptLibrary();
   return <>
     <Button type="button" size="sm" variant="outline" disabled={!ready || Boolean(error) || !prompt.trim() || prompt.length > MAX_SAVED_PROMPT_CHARACTERS} onClick={() => setOpen(true)}>Save prompt</Button>
-    <PromptEditorDialog open={open} onOpenChange={setOpen} initialPrompt={prompt} />
+    <PromptEditorDialog open={open} onOpenChange={setOpen} initialPrompt={prompt} initialTitle={title} initialCategory={category} />
   </>;
 }
