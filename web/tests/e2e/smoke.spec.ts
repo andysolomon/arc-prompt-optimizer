@@ -87,7 +87,7 @@ test("examples cover every pattern and load into Optimize without submitting", a
   });
   await page.goto("/examples");
   await expect(page.getByRole("heading", { name: "Example prompts" })).toBeVisible();
-  await expect(page.getByRole("article")).toHaveCount(PATTERN_EXAMPLES.length);
+  await expect(page.locator("#patterns").getByRole("article")).toHaveCount(PATTERN_EXAMPLES.length);
   for (const example of PATTERN_EXAMPLES) {
     await expect(page.locator(`article#${example.pattern} pre`)).toHaveText(example.prompt);
   }
