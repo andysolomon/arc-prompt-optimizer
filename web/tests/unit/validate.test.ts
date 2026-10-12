@@ -31,6 +31,21 @@ describe("validateOptimizeBody", () => {
     expect(validateOptimizeBody({ ...body, refine: "yes" }, all, true)).toMatchObject({ ok: false, status: 400 });
   });
 
+  it("keeps trimmed rewrite details, drops blank ones, and bounds their length", () => {
+    const given = validateOptimizeBody({ prompt: "p", model: all[0], judge: false, context: "  Reports are markdown. ", useCase: "Exec email" }, all);
+    expect(given).toMatchObject({ ok: true, value: { context: "Reports are markdown.", useCase: "Exec email" } });
+    const blank = validateOptimizeBody({ prompt: "p", model: all[0], judge: false, context: "   ", useCase: "" }, all);
+    expect(blank.ok).toBe(true);
+    if (blank.ok) {
+      expect(blank.value.context).toBeUndefined();
+      expect(blank.value.useCase).toBeUndefined();
+    }
+    expect(validateOptimizeBody({ prompt: "p", model: all[0], judge: false, context: 7 }, all)).toMatchObject({ ok: false, status: 400, message: "context must be a string." });
+    const long = validateOptimizeBody({ prompt: "p", model: all[0], judge: false, useCase: "x".repeat(4_097) }, all);
+    expect(long).toMatchObject({ ok: false, status: 400 });
+    if (!long.ok) expect(long.message).toMatch(/4,096/u);
+  });
+
   it("rejects an empty or whitespace-only prompt with 400", () => {
     expect(validateOptimizeBody({ prompt: "", model: all[0], judge: true }, all)).toMatchObject({ ok: false, status: 400, message: "Prompt must not be empty." });
     expect(validateOptimizeBody({ prompt: "   \n", model: all[0], judge: true }, all)).toMatchObject({ ok: false, status: 400 });

@@ -1,5 +1,5 @@
 import { CliError } from "./errors.mjs";
-const COMMANDS = new Set(["optimize", "evaluate", "patterns", "models", "candidates", "score"]);
+const COMMANDS = new Set(["optimize", "evaluate", "patterns", "models", "candidates", "score", "rewrite-prompt", "rewrite-candidate"]);
 const BOOLEAN_FLAGS = new Set(["json", "simulate", "help"]);
 const VALUE_FLAGS = new Set([
     "prompt",
@@ -12,8 +12,14 @@ const VALUE_FLAGS = new Set([
     "timeout-ms",
     "output",
     "outputs",
+    "context",
+    "context-file",
+    "use-case",
+    "use-case-file",
+    "reply",
 ]);
-const OPTIMIZE_FLAGS = [...BOOLEAN_FLAGS, ...VALUE_FLAGS].filter((flag) => flag !== "outputs");
+const REWRITE_INPUT_FLAGS = ["context", "context-file", "use-case", "use-case-file", "reply"];
+const OPTIMIZE_FLAGS = [...BOOLEAN_FLAGS, ...VALUE_FLAGS].filter((flag) => flag !== "outputs" && !REWRITE_INPUT_FLAGS.includes(flag));
 const COMMAND_FLAGS = Object.freeze({
     optimize: new Set(OPTIMIZE_FLAGS),
     evaluate: new Set(OPTIMIZE_FLAGS),
@@ -21,6 +27,8 @@ const COMMAND_FLAGS = Object.freeze({
     models: new Set(["json", "simulate", "help"]),
     candidates: new Set(["json", "help", "prompt", "prompt-file"]),
     score: new Set(["json", "help", "suite", "outputs"]),
+    "rewrite-prompt": new Set(["json", "help", "prompt", "prompt-file", "context", "context-file", "use-case", "use-case-file"]),
+    "rewrite-candidate": new Set(["json", "help", "prompt", "prompt-file", "reply"]),
 });
 function isCommand(value) {
     return COMMANDS.has(value);
@@ -33,7 +41,7 @@ function pushFlag(flags, name, value) {
 export function parseArgs(argv) {
     const [commandValue, ...rest] = argv;
     if (commandValue === undefined || commandValue === "--help" || commandValue === "-h") {
-        throw new CliError("MISSING_ARGUMENT", "Usage: arc-prompt <optimize|evaluate|patterns|models|candidates|score> [options]");
+        throw new CliError("MISSING_ARGUMENT", "Usage: arc-prompt <optimize|evaluate|patterns|models|candidates|score|rewrite-prompt|rewrite-candidate> [options]");
     }
     if (!isCommand(commandValue)) {
         throw new CliError("INVALID_ARGUMENT", `Unknown command '${commandValue}'.`);

@@ -7,7 +7,14 @@ import test from "node:test";
 
 import { MAX_CLI_PROMPT_CHARACTERS } from "../dist/cli/io.js";
 import { runCli } from "../dist/cli/main.js";
-import { MAX_COMPLETION_OUTPUT_CHARACTERS, MAX_EVALUATION_CANDIDATES, PREVIEW_SUITE as CORE_PREVIEW_SUITE } from "../dist/core/index.js";
+import {
+  MAX_COMPLETION_OUTPUT_CHARACTERS,
+  MAX_EVALUATION_CANDIDATES,
+  MAX_REWRITE_INPUT_CHARACTERS,
+  PREVIEW_SUITE as CORE_PREVIEW_SUITE,
+  buildRewritePrompt,
+  rewriteCandidate,
+} from "../dist/core/index.js";
 import { PREVIEW_SUITE, buildPreviewCandidates } from "../dist/extension/run.js";
 
 const rootPath = new URL("../", import.meta.url).pathname;
@@ -86,6 +93,14 @@ test("help lists candidates and score and documents the preview case id", async 
   assert.equal(top.code, 0);
   assert.ok(top.stdout.includes("candidates"));
   assert.ok(top.stdout.includes("score"));
+  assert.ok(top.stdout.includes("rewrite-prompt"));
+  assert.ok(top.stdout.includes("rewrite-candidate"));
+  const rewritePrompt = await run(["rewrite-prompt", "--help"]);
+  assert.match(rewritePrompt.stdout, /^Usage: arc-prompt rewrite-prompt/u);
+  assert.ok(rewritePrompt.stdout.includes("--use-case-file"));
+  const rewriteCandidateHelp = await run(["rewrite-candidate", "--help"]);
+  assert.match(rewriteCandidateHelp.stdout, /^Usage: arc-prompt rewrite-candidate/u);
+  assert.ok(rewriteCandidateHelp.stdout.includes("INVALID_REWRITE_REPLY"));
   const candidates = await run(["candidates", "--help"]);
   assert.match(candidates.stdout, /^Usage: arc-prompt candidates/u);
   const score = await run(["score", "--help"]);
@@ -311,4 +326,85 @@ test("candidates and score never load @earendil-works packages", async () => {
   const models = await exec(["models"]);
   assert.notEqual(models.code, 0);
   assert.match(models.stderr, /PI_LOADED:@earendil-works\//u);
+});
+
+const REPLY = "<analysis>\n- No audience.\n</analysis>\n\n<rewritten_prompt>\nYou are a release manager.\n\n<notes>\n[paste the release notes]\n</notes>\n\nSummarize them in 3 bullets.\n</rewritten_prompt>\n\n<changes>\n1. Added a role.\n2. Set the format.\n</changes>";
+
+test("rewrite-prompt prints the meta-prompt from any prompt source, with optional context and use case", async () => {
+  const plain = await run(["rewrite-prompt", "--prompt", PROMPT, "--json"]);
+  assert.equal(plain.code, 0, plain.stderr);
+  assert.deepEqual(JSON.parse(plain.stdout), { prompt: buildRewritePrompt(PROMPT) });
+  const viaStdin = await run(["rewrite-prompt"], { stdin: PROMPT });
+  assert.equal(viaStdin.code, 0, viaStdin.stderr);
+  assert.equal(viaStdin.stdout, `${buildRewritePrompt(PROMPT)}\n`);
+
+  await withTempDir(async (dir) => {
+    const useCasePath = join(dir, "use-case.txt");
+    await writeFile(useCasePath, "Changelog entry read by developers.\n", "utf8");
+    const detailed = await run(["rewrite-prompt", "--prompt", PROMPT, "--context", "Notes come from git log.", "--use-case-file", useCasePath, "--json"]);
+    assert.equal(detailed.code, 0, detailed.stderr);
+    assert.deepEqual(JSON.parse(detailed.stdout), {
+      prompt: buildRewritePrompt(PROMPT, { context: "Notes come from git log.", useCase: "Changelog entry read by developers." }),
+    });
+  });
+
+  const both = await run(["rewrite-prompt", "--prompt", PROMPT, "--context", "a", "--context-file", "b.txt"]);
+  assert.equal(both.code, 2);
+  assert.match(both.stderr, /^AMBIGUOUS_INPUT: Provide --context or --context-file, not both/u);
+  const oversized = await run(["rewrite-prompt", "--prompt", PROMPT, "--use-case", "x".repeat(MAX_REWRITE_INPUT_CHARACTERS + 1)]);
+  assert.equal(oversized.code, 2);
+  assert.match(oversized.stderr, /^INPUT_TOO_LARGE: Rewrite use case/u);
+  const unsupported = await run(["rewrite-prompt", "--prompt", PROMPT, "--reply", "r.txt"]);
+  assert.equal(unsupported.code, 2);
+  assert.match(unsupported.stderr, /not supported by 'rewrite-prompt'/u);
+});
+
+test("rewrite-candidate parses a reply from a file or stdin into a candidate that score accepts", async () => {
+  const expected = rewriteCandidate(PROMPT, "You are a release manager.\n\n<notes>\n[paste the release notes]\n</notes>\n\nSummarize them in 3 bullets.");
+  const viaStdin = await run(["rewrite-candidate", "--prompt", PROMPT, "--json"], { stdin: REPLY });
+  assert.equal(viaStdin.code, 0, viaStdin.stderr);
+  const payload = JSON.parse(viaStdin.stdout);
+  assert.deepEqual(Object.keys(payload), ["analysis", "candidate", "changes"]);
+  assert.deepEqual(payload.candidate, { id: expected.id, pattern: "rewrite", prompt: expected.prompt.text });
+  assert.deepEqual(payload.analysis, ["No audience."]);
+  assert.deepEqual(payload.changes, ["Added a role.", "Set the format."]);
+
+  await withTempDir(async (dir) => {
+    const replyPath = join(dir, "reply.md");
+    await writeFile(replyPath, `Sure, here you go:\n${REPLY}`, "utf8");
+    const viaFile = await run(["rewrite-candidate", "--prompt", PROMPT, "--reply", replyPath]);
+    assert.equal(viaFile.code, 0, viaFile.stderr);
+    assert.ok(viaFile.stdout.startsWith(`== ${expected.id} (rewrite, pattern: rewrite)\n${expected.prompt.text}\n\nAnalysis\n- No audience.\n\nChanges\n1. Added a role.\n2. Set the format.\n`));
+
+    const outputs = {
+      candidates: [
+        ...buildPreviewCandidates(PROMPT).map((candidate) => ({ id: candidate.id, outputs: { preview: "" } })),
+        { id: payload.candidate.id, prompt: payload.candidate.prompt, outputs: { preview: "- one\n- two\n- three" } },
+      ],
+    };
+    const outputsPath = join(dir, "outputs.json");
+    await writeFile(outputsPath, JSON.stringify(outputs), "utf8");
+    const scored = await run(["score", "--outputs", outputsPath, "--json"]);
+    assert.equal(scored.code, 0, scored.stderr);
+    assert.equal(JSON.parse(scored.stdout).ranking[0].candidateId, payload.candidate.id);
+  });
+});
+
+test("rewrite-candidate rejects an unparseable reply, a missing draft, and ambiguous sources", async () => {
+  const invalid = await run(["rewrite-candidate", "--prompt", PROMPT], { stdin: "Here is a better prompt: be specific." });
+  assert.equal(invalid.code, 2);
+  assert.match(invalid.stderr, /^INVALID_REWRITE_REPLY: rewrite reply has no complete <rewritten_prompt> section/u);
+  const noDraft = await run(["rewrite-candidate"], { stdin: REPLY });
+  assert.equal(noDraft.code, 2);
+  assert.match(noDraft.stderr, /^MISSING_INPUT: Provide the draft prompt from --prompt or --prompt-file\./u);
+  const noReply = await run(["rewrite-candidate", "--prompt", PROMPT]);
+  assert.equal(noReply.code, 2);
+  assert.match(noReply.stderr, /^MISSING_INPUT: Provide the rewrite reply/u);
+  await withTempDir(async (dir) => {
+    const replyPath = join(dir, "reply.md");
+    await writeFile(replyPath, REPLY, "utf8");
+    const ambiguous = await run(["rewrite-candidate", "--prompt", PROMPT, "--reply", replyPath], { stdin: REPLY });
+    assert.equal(ambiguous.code, 2);
+    assert.match(ambiguous.stderr, /^AMBIGUOUS_INPUT:/u);
+  });
 });

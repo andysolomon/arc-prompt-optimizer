@@ -9,6 +9,8 @@ export const MAX_CLI_PROMPT_CHARACTERS = 16_384;
 const PROMPT_READ_CHUNK_BYTES = 4_096;
 export const MAX_CLI_SUITE_JSON_BYTES = 8 * 1024 * 1024;
 export const MAX_CLI_OUTPUTS_JSON_BYTES = 8 * 1024 * 1024;
+/** A rewrite reply is one model output: a prompt plus notes, never a whole outputs file. */
+export const MAX_CLI_REPLY_BYTES = 1024 * 1024;
 export async function writeStream(stream, text) {
     await new Promise((resolvePromise, reject) => {
         stream.write(text, (error) => {
@@ -101,9 +103,9 @@ function readBoundedUtf8Stream(stream, maxBytes, tooLarge) {
         stream.on("error", rejectOnce);
     });
 }
-async function readBoundedUtf8File(path, displayPath, maxBytes) {
+async function readBoundedUtf8File(path, displayPath, maxBytes, tooLarge = () => suiteTooLargeError(displayPath)) {
     const stream = createReadStream(path, { encoding: "utf8", highWaterMark: PROMPT_READ_CHUNK_BYTES });
-    return await readBoundedUtf8Stream(stream, maxBytes, () => suiteTooLargeError(displayPath));
+    return await readBoundedUtf8Stream(stream, maxBytes, tooLarge);
 }
 export async function loadPrompt(args, io) {
     const promptValues = flagValues(args, "prompt");
@@ -133,6 +135,62 @@ export async function loadPrompt(args, io) {
         throw new CliError("INPUT_TOO_LARGE", `Prompt input is ${prompt.length} UTF-16 characters; limit is ${MAX_CLI_PROMPT_CHARACTERS}.`);
     }
     return prompt;
+}
+/** Loads the draft prompt from --prompt or --prompt-file only, for commands whose stdin carries something else. */
+export async function loadPromptFromFlags(args, io) {
+    const promptValue = singleFlag(args, "prompt");
+    const fileValue = singleFlag(args, "prompt-file");
+    if (promptValue !== undefined && fileValue !== undefined) {
+        throw new CliError("AMBIGUOUS_INPUT", "Provide the draft prompt from exactly one source: --prompt or --prompt-file.");
+    }
+    let prompt;
+    if (promptValue !== undefined)
+        prompt = promptValue;
+    else if (fileValue !== undefined)
+        prompt = await readPromptFile(resolve(io.cwd, fileValue));
+    else
+        throw new CliError("MISSING_INPUT", "Provide the draft prompt from --prompt or --prompt-file.");
+    if (prompt.trim() === "")
+        throw new CliError("MISSING_INPUT", "Draft prompt cannot be empty.");
+    if (prompt.length > MAX_CLI_PROMPT_CHARACTERS) {
+        throw new CliError("INPUT_TOO_LARGE", `Draft prompt is ${prompt.length} UTF-16 characters; limit is ${MAX_CLI_PROMPT_CHARACTERS}.`);
+    }
+    return prompt;
+}
+/**
+ * Loads an optional text input from `--<name> <text>` or `--<name>-file <file>`. Returns undefined when neither
+ * is given; the caller applies its own size limit.
+ */
+export async function loadOptionalText(args, io, name) {
+    const textValue = singleFlag(args, name);
+    const fileValue = singleFlag(args, `${name}-file`);
+    if (textValue !== undefined && fileValue !== undefined) {
+        throw new CliError("AMBIGUOUS_INPUT", `Provide --${name} or --${name}-file, not both.`);
+    }
+    if (textValue !== undefined)
+        return textValue;
+    if (fileValue === undefined)
+        return undefined;
+    return await readBoundedUtf8File(resolve(io.cwd, fileValue), fileValue, MAX_CLI_PROMPT_CHARACTERS * 4, () => new CliError("INPUT_TOO_LARGE", `File '${fileValue}' for --${name}-file exceeds ${MAX_CLI_PROMPT_CHARACTERS * 4} bytes.`));
+}
+/** Reads a model's reply to the rewrite meta-prompt from exactly one source: --reply <file> or stdin. */
+export async function loadReplyText(args, io) {
+    const path = singleFlag(args, "reply");
+    let stdinText = "";
+    if (io.stdin.isTTY !== true) {
+        io.stdin.setEncoding("utf8");
+        stdinText = await readBoundedUtf8Stream(io.stdin, MAX_CLI_REPLY_BYTES, () => new CliError("INPUT_TOO_LARGE", `Reply input on stdin exceeds ${MAX_CLI_REPLY_BYTES} bytes.`));
+    }
+    const hasStdin = stdinText.trim() !== "";
+    if (path !== undefined && hasStdin) {
+        throw new CliError("AMBIGUOUS_INPUT", "Provide the rewrite reply from exactly one source: --reply or stdin.");
+    }
+    if (path !== undefined) {
+        return await readBoundedUtf8File(resolve(io.cwd, path), path, MAX_CLI_REPLY_BYTES, () => new CliError("INPUT_TOO_LARGE", `Reply file '${path}' exceeds ${MAX_CLI_REPLY_BYTES} bytes.`));
+    }
+    if (hasStdin)
+        return stdinText;
+    throw new CliError("MISSING_INPUT", "Provide the rewrite reply from --reply <file> or stdin.");
 }
 export async function loadSuite(args, io) {
     const path = singleFlag(args, "suite");

@@ -149,6 +149,27 @@ export function formatCandidatesText(candidates) {
     const sections = candidates.map((candidate) => [`== ${candidate.id} (${candidate.label}, pattern: ${candidate.pattern})`, candidate.prompt].join("\n"));
     return `${sections.join("\n\n")}\n`;
 }
+export function formatRewritePromptJson(prompt) {
+    return formatJson({ prompt });
+}
+export function formatRewritePromptText(prompt) {
+    return `${prompt}\n`;
+}
+export function formatRewriteCandidateJson(result) {
+    return formatJson({
+        analysis: result.analysis,
+        candidate: { id: result.candidate.id, pattern: result.candidate.pattern, prompt: result.candidate.prompt },
+        changes: result.changes,
+    });
+}
+export function formatRewriteCandidateText(result) {
+    const sections = [
+        [`== ${result.candidate.id} (${result.candidate.label}, pattern: ${result.candidate.pattern})`, result.candidate.prompt].join("\n"),
+        ["Analysis", ...(result.analysis.length === 0 ? ["(none)"] : result.analysis.map((item) => `- ${item}`))].join("\n"),
+        ["Changes", ...(result.changes.length === 0 ? ["(none)"] : result.changes.map((item, index) => `${index + 1}. ${item}`))].join("\n"),
+    ];
+    return `${sections.join("\n\n")}\n`;
+}
 export function formatScoreJson(result) {
     return formatJson({
         evaluations: result.evaluations,

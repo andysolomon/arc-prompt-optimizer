@@ -6,7 +6,7 @@ import type {
   RankedCandidate,
   SuiteEvaluation,
 } from "../core/index.js";
-import type { HarnessCandidateView, HarnessScoreResult } from "./harness.js";
+import type { HarnessCandidateView, HarnessRewriteCandidate, HarnessScoreResult } from "./harness.js";
 import { stringifyCliJsonLine } from "./json.js";
 
 function valueOf(measurement: { readonly status: string; readonly value?: number; readonly reason?: string }): string {
@@ -182,6 +182,31 @@ export function formatCandidatesText(candidates: readonly HarnessCandidateView[]
   const sections = candidates.map((candidate) =>
     [`== ${candidate.id} (${candidate.label}, pattern: ${candidate.pattern})`, candidate.prompt].join("\n"),
   );
+  return `${sections.join("\n\n")}\n`;
+}
+
+export function formatRewritePromptJson(prompt: string): string {
+  return formatJson({ prompt });
+}
+
+export function formatRewritePromptText(prompt: string): string {
+  return `${prompt}\n`;
+}
+
+export function formatRewriteCandidateJson(result: HarnessRewriteCandidate): string {
+  return formatJson({
+    analysis: result.analysis,
+    candidate: { id: result.candidate.id, pattern: result.candidate.pattern, prompt: result.candidate.prompt },
+    changes: result.changes,
+  });
+}
+
+export function formatRewriteCandidateText(result: HarnessRewriteCandidate): string {
+  const sections = [
+    [`== ${result.candidate.id} (${result.candidate.label}, pattern: ${result.candidate.pattern})`, result.candidate.prompt].join("\n"),
+    ["Analysis", ...(result.analysis.length === 0 ? ["(none)"] : result.analysis.map((item) => `- ${item}`))].join("\n"),
+    ["Changes", ...(result.changes.length === 0 ? ["(none)"] : result.changes.map((item, index) => `${index + 1}. ${item}`))].join("\n"),
+  ];
   return `${sections.join("\n\n")}\n`;
 }
 

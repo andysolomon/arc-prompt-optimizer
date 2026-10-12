@@ -3,24 +3,41 @@ import { MAX_COMPLETION_OUTPUT_CHARACTERS } from "../adapters/completion.js";
 import { CoreValidationError } from "../core/errors.js";
 import { MAX_EVALUATION_CANDIDATES } from "../core/evaluation.js";
 import { PREVIEW_SUITE } from "../core/preview.js";
+import { MAX_REWRITE_INPUT_CHARACTERS } from "../core/rewrite.js";
 import { hasFlag, parseArgs, type ParsedArgs } from "./args.js";
 import { CliError } from "./errors.js";
-import { harnessCandidates, scoreHarnessOutputs } from "./harness.js";
+import { harnessCandidates, harnessRewriteCandidate, harnessRewritePrompt, scoreHarnessOutputs } from "./harness.js";
 import {
   MAX_CLI_OUTPUTS_JSON_BYTES,
   MAX_CLI_PROMPT_CHARACTERS,
+  MAX_CLI_REPLY_BYTES,
   type CliIo,
   loadOptionalSuite,
+  loadOptionalText,
   loadOutputsJson,
   loadPrompt,
+  loadPromptFromFlags,
+  loadReplyText,
   writeStream,
 } from "./io.js";
-import { formatCandidatesJson, formatCandidatesText, formatScoreJson, formatScoreText } from "./output.js";
+import {
+  formatCandidatesJson,
+  formatCandidatesText,
+  formatRewriteCandidateJson,
+  formatRewriteCandidateText,
+  formatRewritePromptJson,
+  formatRewritePromptText,
+  formatScoreJson,
+  formatScoreText,
+} from "./output.js";
 
 /**
- * Model-free entry for `candidates` and `score`. It must not import Pi, completion adapters with runtime
- * dependencies, or any npm package: the skill tool bundle under skills/prompt-optimize/scripts is built from it.
+ * Model-free entry for `candidates`, `score`, `rewrite-prompt`, and `rewrite-candidate`. It must not import Pi,
+ * completion adapters with runtime dependencies, or any npm package: the skill tool bundle under
+ * skills/prompt-optimize/scripts is built from it.
  */
+
+const HARNESS_COMMANDS = new Set(["candidates", "score", "rewrite-prompt", "rewrite-candidate"]);
 
 export interface RunHarnessCliOptions {
   readonly argv?: readonly string[];
@@ -62,16 +79,58 @@ Options:
   -h, --help                Show help.
 `;
 
+export const REWRITE_PROMPT_HELP = `Usage: arc-prompt rewrite-prompt [--prompt <text>|--prompt-file <file>|stdin] [options]
+
+Print the meta-prompt that asks a model to analyze a draft prompt and rewrite it with a specific role, an
+explicit output format, constraints, and examples. Answer it with the harness's own model, then turn the
+reply into a candidate with 'rewrite-candidate'. No model calls, credentials, or network access.
+
+Options:
+  --prompt <text>           Draft prompt as an argument.
+  --prompt-file <file>      Draft prompt from a file.
+  --context <text>          Optional task context: where the prompt runs and what it works on.
+  --context-file <file>     Task context from a file.
+  --use-case <text>         Optional target use case: what the output is for and who reads it.
+  --use-case-file <file>    Target use case from a file.
+  --json                    Emit canonical JSON: {"prompt":"<meta-prompt>"}.
+  Limits: ${MAX_CLI_PROMPT_CHARACTERS} UTF-16 characters of draft, ${MAX_REWRITE_INPUT_CHARACTERS} of context and of use case.
+  -h, --help                Show help.
+`;
+
+export const REWRITE_CANDIDATE_HELP = `Usage: arc-prompt rewrite-candidate --prompt <text>|--prompt-file <file> [--reply <file>|stdin] [options]
+
+Parse a model's reply to the 'rewrite-prompt' meta-prompt into a rewrite candidate whose id 'score' accepts
+next to the 'candidates' output. The reply must hold complete <analysis>, <rewritten_prompt>, and <changes>
+sections; a missing or empty <rewritten_prompt> fails with INVALID_REWRITE_REPLY instead of guessing.
+
+Options:
+  --prompt <text>           The original draft prompt as an argument (never read from stdin here).
+  --prompt-file <file>      The original draft prompt from a file.
+  --reply <file>            The model's reply from a file (otherwise read from stdin).
+  --json                    Emit canonical JSON: {"candidate":{"id","pattern","prompt"},"analysis":[],"changes":[]}.
+  Limits: ${MAX_CLI_PROMPT_CHARACTERS} UTF-16 characters of draft, ${MAX_CLI_REPLY_BYTES} bytes of reply.
+  -h, --help                Show help.
+`;
+
 const HARNESS_TOOLS_HELP = `Usage: arc-prompt-tools <command> [options]
 
 Model-free prompt optimization tools for any agent harness (no model calls, credentials, or network access).
 
 Commands:
-  candidates Print the baseline and pattern prompt candidates.
-  score      Score harness-produced candidate outputs deterministically.
+  candidates        Print the baseline and pattern prompt candidates.
+  rewrite-prompt    Print the meta-prompt that asks a model to rewrite the draft.
+  rewrite-candidate Parse the model's rewrite reply into a candidate for 'score'.
+  score             Score harness-produced candidate outputs deterministically.
 
 Run 'arc-prompt-tools <command> --help' for command-specific options.
 `;
+
+const HARNESS_HELP: Readonly<Record<string, string>> = Object.freeze({
+  candidates: CANDIDATES_HELP,
+  score: SCORE_HELP,
+  "rewrite-prompt": REWRITE_PROMPT_HELP,
+  "rewrite-candidate": REWRITE_CANDIDATE_HELP,
+});
 
 export function defaultCliIo(): CliIo {
   return {
@@ -97,6 +156,27 @@ export async function commandScore(args: ParsedArgs, io: CliIo): Promise<number>
   return 0;
 }
 
+export async function commandRewritePrompt(args: ParsedArgs, io: CliIo): Promise<number> {
+  const prompt = await loadPrompt(args, io);
+  const context = await loadOptionalText(args, io, "context");
+  const useCase = await loadOptionalText(args, io, "use-case");
+  const metaPrompt = harnessRewritePrompt(prompt, {
+    ...(context === undefined ? {} : { context }),
+    ...(useCase === undefined ? {} : { useCase }),
+  });
+  await writeStream(io.stdout, hasFlag(args, "json") ? formatRewritePromptJson(metaPrompt) : formatRewritePromptText(metaPrompt));
+  return 0;
+}
+
+export async function commandRewriteCandidate(args: ParsedArgs, io: CliIo): Promise<number> {
+  const prompt = await loadPromptFromFlags(args, io);
+  const reply = await loadReplyText(args, io);
+  const parsed = harnessRewriteCandidate(prompt, reply);
+  if (parsed.status === "invalid") throw new CliError("INVALID_REWRITE_REPLY", `${parsed.reason}.`);
+  await writeStream(io.stdout, hasFlag(args, "json") ? formatRewriteCandidateJson(parsed.value) : formatRewriteCandidateText(parsed.value));
+  return 0;
+}
+
 /** Maps errors to the shared CLI exit codes: 2 for usage/validation errors, 1 otherwise. */
 export async function reportCliError(error: unknown, io: CliIo): Promise<number> {
   if (error instanceof CliError || error instanceof CoreValidationError) {
@@ -111,7 +191,7 @@ export async function reportCliError(error: unknown, io: CliIo): Promise<number>
   return 1;
 }
 
-/** Runs only `candidates` and `score`, with the same flags and output as `arc-prompt`. */
+/** Runs the model-free commands only, with the same flags and output as `arc-prompt`. */
 export async function runHarnessCli(options: RunHarnessCliOptions = {}): Promise<number> {
   const io = options.io ?? defaultCliIo();
   try {
@@ -121,15 +201,27 @@ export async function runHarnessCli(options: RunHarnessCliOptions = {}): Promise
       await writeStream(command === undefined ? io.stderr : io.stdout, HARNESS_TOOLS_HELP);
       return command === undefined ? 2 : 0;
     }
-    if (command !== "candidates" && command !== "score") {
-      throw new CliError("INVALID_ARGUMENT", `Unknown command '${command}'. Supported commands: candidates, score.`);
+    if (!HARNESS_COMMANDS.has(command)) {
+      throw new CliError(
+        "INVALID_ARGUMENT",
+        `Unknown command '${command}'. Supported commands: candidates, score, rewrite-prompt, rewrite-candidate.`,
+      );
     }
     const args = parseArgs(argv);
     if (hasFlag(args, "help")) {
-      await writeStream(io.stdout, command === "candidates" ? CANDIDATES_HELP : SCORE_HELP);
+      await writeStream(io.stdout, HARNESS_HELP[command]!);
       return 0;
     }
-    return command === "candidates" ? await commandCandidates(args, io) : await commandScore(args, io);
+    switch (command) {
+      case "candidates":
+        return await commandCandidates(args, io);
+      case "score":
+        return await commandScore(args, io);
+      case "rewrite-prompt":
+        return await commandRewritePrompt(args, io);
+      default:
+        return await commandRewriteCandidate(args, io);
+    }
   } catch (error) {
     return await reportCliError(error, io);
   }

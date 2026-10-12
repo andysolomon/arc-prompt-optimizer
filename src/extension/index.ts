@@ -21,11 +21,13 @@ export {
   PREVIEW_COMPLETION_COUNT,
   PREVIEW_COMPLETION_TIMEOUT_MS,
   PREVIEW_SUITE,
+  REWRITE_COMPLETION_TIMEOUT_MS,
+  REWRITE_PREVIEW_COMPLETION_COUNT,
   baselineCandidate,
   buildPreviewCandidates,
   runPreview,
 } from "./run.js";
-export type { PreviewRunOptions, PreviewRunResult } from "./run.js";
+export type { PreviewRewriteReport, PreviewRunOptions, PreviewRunResult } from "./run.js";
 export {
   MAX_EXTENSION_PROMPT_CHARACTERS,
   collectPromptSources,

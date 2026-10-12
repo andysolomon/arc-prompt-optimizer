@@ -1,18 +1,25 @@
 "use client";
 
+import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SavePromptButton } from "@/components/library/prompt-editor-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCharacterCount } from "@/lib/format";
-import { MAX_PROMPT_CHARACTERS, REFINE_DEFAULT_ROUNDS, REFINE_DEFAULT_VARIANTS, type ModelInfo } from "@/lib/types";
+import { MAX_PROMPT_CHARACTERS, MAX_REWRITE_DETAIL_CHARACTERS, REFINE_DEFAULT_ROUNDS, REFINE_DEFAULT_VARIANTS, type ModelInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export function PromptForm({
   prompt,
   onPromptChange,
+  context,
+  onContextChange,
+  useCase,
+  onUseCaseChange,
   models,
   modelsLoaded,
   model,
@@ -28,6 +35,10 @@ export function PromptForm({
 }: {
   prompt: string;
   onPromptChange: (value: string) => void;
+  context: string;
+  onContextChange: (value: string) => void;
+  useCase: string;
+  onUseCaseChange: (value: string) => void;
   models: readonly ModelInfo[];
   modelsLoaded: boolean;
   model: string;
@@ -75,6 +86,7 @@ export function PromptForm({
           </span>
           <span id="prompt-limit">Limit {MAX_PROMPT_CHARACTERS.toLocaleString("en-US")} characters</span>
         </div>
+        <RewriteDetails context={context} onContextChange={onContextChange} useCase={useCase} onUseCaseChange={onUseCaseChange} />
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border p-4">
         <div className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -139,6 +151,93 @@ function RefineSwitch({ refine, available, onChange }: { refine: boolean; availa
         Turn on the Jev judge to refine: without it every preview candidate ties.
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+/** Optional task context and target use case from the reference protocol; the rewrite uses them to pick role, audience, and format. */
+function RewriteDetails({
+  context,
+  onContextChange,
+  useCase,
+  onUseCaseChange,
+}: {
+  context: string;
+  onContextChange: (value: string) => void;
+  useCase: string;
+  onUseCaseChange: (value: string) => void;
+}) {
+  const filled = context.trim() !== "" || useCase.trim() !== "";
+  const [open, setOpen] = useState(filled);
+  return (
+    <Collapsible open={open || filled} onOpenChange={setOpen} className="mt-3">
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="flex items-center gap-1.5 rounded-md text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ChevronDown aria-hidden="true" className={cn("size-3.5 transition-transform", (open || filled) && "rotate-180")} />
+          Rewrite details (optional)
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <DetailField
+            id="rewrite-context"
+            label="Task context"
+            hint="Where the prompt runs and what it works on."
+            placeholder="Incident reports arrive as PagerDuty markdown with a timeline and an impact section."
+            value={context}
+            onChange={onContextChange}
+          />
+          <DetailField
+            id="rewrite-use-case"
+            label="Target use case"
+            hint="What the output is for and who reads it."
+            placeholder="A weekly email to executives who skim on their phones."
+            value={useCase}
+            onChange={onUseCaseChange}
+          />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function DetailField({
+  id,
+  label,
+  hint,
+  placeholder,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const overLimit = value.length > MAX_REWRITE_DETAIL_CHARACTERS;
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="text-xs font-medium">
+        {label}
+      </label>
+      <Textarea
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+        aria-describedby={`${id}-hint`}
+        aria-invalid={overLimit || undefined}
+        className="min-h-[72px] resize-y rounded-lg border-border bg-background p-2.5 text-sm leading-relaxed md:text-sm"
+      />
+      <span id={`${id}-hint`} className={cn("text-[11px] text-muted-foreground", overLimit && "text-destructive")}>
+        {overLimit ? `Over the ${MAX_REWRITE_DETAIL_CHARACTERS.toLocaleString("en-US")} character limit.` : hint}
+      </span>
+    </div>
   );
 }
 

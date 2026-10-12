@@ -124,9 +124,20 @@ test("the skill tool runs from a copy outside the repo with no node_modules and 
     const help = await run(process.execPath, [entry, "score", "--help"], { cwd: work });
     assert.equal(help.stdout, (await arcPrompt(["score", "--help"])).stdout);
 
+    const metaPrompt = await run(process.execPath, [entry, "rewrite-prompt", "--prompt-file", "prompt.txt", "--use-case", "Changelog", "--json"], { cwd: work });
+    assert.equal(metaPrompt.stdout, (await arcPrompt(["rewrite-prompt", "--prompt", prompt, "--use-case", "Changelog", "--json"])).stdout);
+    assert.ok(JSON.parse(metaPrompt.stdout).prompt.includes("Target use case:"));
+    await writeFile(
+      join(work, "reply.md"),
+      "<analysis>\n- Vague.\n</analysis>\n<rewritten_prompt>\nYou are a release manager. Write 3 bullets.\n</rewritten_prompt>\n<changes>\n1. Role.\n</changes>",
+    );
+    const rewrite = await run(process.execPath, [entry, "rewrite-candidate", "--prompt-file", "prompt.txt", "--reply", "reply.md", "--json"], { cwd: work });
+    assert.equal(rewrite.stdout, (await arcPrompt(["rewrite-candidate", "--prompt", prompt, "--reply", join(work, "reply.md"), "--json"])).stdout);
+    assert.match(JSON.parse(rewrite.stdout).candidate.id, /^rewrite-[0-9a-f]{8}$/u);
+
     await assert.rejects(run(process.execPath, [entry, "optimize", "--simulate"], { cwd: work }), (error) => {
       assert.equal(error.code, 2);
-      assert.match(error.stderr, /Supported commands: candidates, score/u);
+      assert.match(error.stderr, /Supported commands: candidates, score, rewrite-prompt, rewrite-candidate/u);
       return true;
     });
   });
