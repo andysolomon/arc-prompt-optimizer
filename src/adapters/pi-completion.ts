@@ -324,6 +324,7 @@ export class PiCompletionAdapter implements CompletionAdapter {
       cacheRetention: "none",
     };
     if (signal !== undefined) streamOptions.signal = signal;
+    if (checkedRequest.temperature !== undefined) streamOptions.temperature = checkedRequest.temperature;
 
     const message = await awaitCompletionWithAbortPriority(
       this.#client.complete(model, context, streamOptions),

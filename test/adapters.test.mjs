@@ -41,6 +41,14 @@ test("completion request normalization is exported from the package root and ada
   assert.equal(normalizeCompletionRequestFromAdapterBarrel, normalizeCompletionRequest);
 });
 
+test("completion request temperature is kept when valid and rejected outside [0, 2]", () => {
+  assert.deepEqual(normalizeCompletionRequest({ prompt: "hello", temperature: 0 }), { prompt: "hello", temperature: 0 });
+  assert.deepEqual(normalizeCompletionRequest({ prompt: "hello", temperature: 1.5 }), { prompt: "hello", temperature: 1.5 });
+  for (const temperature of [-0.1, 2.1, Number.NaN, "1", null]) {
+    assert.throws(() => normalizeCompletionRequest({ prompt: "hello", temperature }), { code: "INVALID_EVALUATION" });
+  }
+});
+
 test("provider-neutral adapters accept requests without fixtureId and receive a cooperative signal", async () => {
   let receivedRequest;
   let receivedSignal;

@@ -81,6 +81,8 @@ export interface CompletionRequest {
   readonly model?: string;
   readonly prompt: string;
   readonly maxOutputCharacters?: number;
+  /** Optional sampling temperature in [0, 2]; adapters that cannot set it ignore the hint. */
+  readonly temperature?: number;
 }
 
 export interface CompletionUsage {
@@ -219,6 +221,8 @@ export interface JudgeRequest {
   readonly input: string | null;
   readonly expectedOutput: string | null;
   readonly candidateOutput: string;
+  /** Text of the candidate prompt that produced `candidateOutput`, for judges that score the pair; absent from the rendered prompt. */
+  readonly candidatePrompt?: string;
   /** Rendered judge prompt: all data sections are entity-escaped and wrapped in explicit delimiters. */
   readonly prompt: string;
 }

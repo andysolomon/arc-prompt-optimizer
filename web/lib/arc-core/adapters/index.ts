@@ -15,11 +15,13 @@ export {
   MAX_COMPLETION_MODEL_CHARACTERS,
   MAX_COMPLETION_OUTPUT_CHARACTERS,
   MAX_COMPLETION_PROMPT_CHARACTERS,
+  MAX_COMPLETION_TEMPERATURE,
   MAX_COMPLETION_TIMEOUT_MS,
   completeWithTimeout,
   normalizeCompletionRequest,
   throwIfCompletionAborted,
   validateCompletionResult,
+  validateTemperature,
 } from "./completion.js";
 export type {
   CompletionAdapterErrorCode,

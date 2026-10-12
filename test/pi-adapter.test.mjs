@@ -116,6 +116,11 @@ test("pi adapter resolves explicit and default model references without provider
   const controller = new AbortController();
   await adapter.complete({ prompt: "hi" }, controller.signal);
   assert.equal(calls.at(-1).options.signal, controller.signal);
+
+  await adapter.complete({ prompt: "hi", temperature: 0.7 });
+  assert.equal(calls.at(-1).options.temperature, 0.7);
+  await adapter.complete({ prompt: "hi" });
+  assert.equal("temperature" in calls.at(-1).options, false, "no temperature is sent unless requested");
 });
 
 test("pi adapter validates defaultModel type, emptiness, and length at construction", () => {
