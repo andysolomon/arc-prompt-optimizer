@@ -4,13 +4,13 @@ Web frontend for [arc-prompt-optimizer](https://github.com/andysolomon/arc-promp
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fandysolomon%2Farc-prompt-optimizer&root-directory=web&project-name=arc-prompt-optimizer&repository-name=arc-prompt-optimizer&env=ANTHROPIC_API_KEY,OPENAI_API_KEY,GOOGLE_GENERATIVE_AI_API_KEY,TYPESAFE_API_KEY&envDescription=Provider%20keys%20are%20optional%3B%20set%20any%20subset.&envLink=https%3A%2F%2Fgithub.com%2Fandysolomon%2Farc-prompt-optimizer%2Fblob%2Fmain%2Fweb%2FREADME.md%23environment)
 
-The Examples tab contains a complete, copyable prompt for each catalog pattern. “Use this prompt” loads it into Optimize for editing without starting a model run.
+The Examples tab contains a complete, copyable prompt for each catalog pattern, and a catalog of design prompts written for image models such as Nano Banana Pro, grouped into brand identity, branded products, 3D objects, posters and illustration, icons and stickers, mockups, apparel, and typography. Every design prompt follows the same structure: a one-line brief, labelled sections for the main element, composition, materials, and palette, a STRICT section of exclusions, and an OUTPUT line with the aspect ratio. Only the `[BRACKETED]` placeholders are meant to change. “Use this prompt” loads any example into Optimize for editing without starting a model run; “Save prompt” on a design prompt opens the library editor with the Design category preselected. The design catalog's grouping follows AmirMušić's public [50 design prompts](https://x.com/AmirMushich/status/2019073081881293302) catalog; the prompt text in `lib/design-examples.ts` is original.
 
 ## Saved prompts
 
 “Save prompt” on the draft or selected candidate opens an editor for the title, exact prompt text, and category. The Library tab also lets you create prompts, search titles and text, filter by category, copy, edit, delete, and load prompts into Optimize without starting a run. Library prompts live in `localStorage` on this browser and origin and survive closing a tab. They are not shared between devices or synced to an account. Export a JSON backup and import it in another browser; imports add missing IDs and preserve existing local records. The library supports up to 500 prompts, each at most 48,000 characters, subject to browser storage capacity. Optimize accepts up to 16,384 characters, so longer saved candidates can be copied or shortened in Edit.
 
-With `TYPESAFE_API_KEY` configured, “Suggest with Jev” sends only the editor's prompt text to TypeSafe. A [Choice question](https://docs.typesafe.ai/primitives/choice) selects Coding, Writing, Research, Summarization, Analysis, Planning, Creative, or Other. The category and confidence are shown for review before saving. You can change the category manually; Jev failures never prevent a manual save. Clearing browser site data removes the library, so use Export for backups.
+With `TYPESAFE_API_KEY` configured, “Suggest with Jev” sends only the editor's prompt text to TypeSafe. A [Choice question](https://docs.typesafe.ai/primitives/choice) selects Coding, Writing, Research, Summarization, Analysis, Planning, Creative, Design, or Other. The category and confidence are shown for review before saving. You can change the category manually; Jev failures never prevent a manual save. Clearing browser site data removes the library, so use Export for backups.
 
 ## Stack
 
@@ -96,7 +96,7 @@ Body: `{ "prompt": string }`, non-empty and at most 48,000 characters. Uses Type
 
 ## Core logic
 
-The web app's `buildPatternCandidates` uses the core's `planPatternSpecs` and `generateCandidates` to render the patterns the plan chose, with the plan's task-specific variable values and the draft as the task. Without a usable plan it renders the patterns from the lesson's decision matrix for the task type that need only the task text, and failing that the critique, decomposition, and structured-reasoning trio. The Examples tab demonstrates task-specific values for every pattern.
+The web app's `buildPatternCandidates` uses the core's `planPatternSpecs` and `generateCandidates` to render the patterns the plan chose, with the plan's task-specific variable values and the draft as the task. Without a usable plan it renders the patterns from the lesson's decision matrix for the task type that need only the task text, and failing that the critique, decomposition, and structured-reasoning trio. The Examples tab demonstrates task-specific values for every pattern and, in its Design section, prompts that are not pattern-based at all.
 
 `generateCandidates`, `planPatternSpecs`, `planSuite`, `rewritePrompt`, `revisePrompt`, `PREVIEW_SUITE`, `evaluateCandidate`, `aggregateCases`, `rankCandidates`, `DEFAULT_RANKING_OBJECTIVE`, and `listPatterns` all come from `lib/arc-core`.
 

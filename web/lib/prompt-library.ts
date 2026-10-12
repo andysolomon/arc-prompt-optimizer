@@ -11,10 +11,11 @@ export const PROMPT_CATEGORIES = {
   analysis: { label: "Analysis", description: "Interpreting data, evaluating evidence, or solving analytical problems." },
   planning: { label: "Planning", description: "Creating plans, schedules, strategies, or step-by-step workflows." },
   creative: { label: "Creative", description: "Brainstorming ideas, storytelling, or creating imaginative content." },
+  design: { label: "Design", description: "Briefing visual work: logos, brand identity, posters, icons, mockups, typography, or image generation." },
   other: { label: "Other", description: "The primary task does not fit any of the other categories." },
 } as const;
 
-export const categorySchema = z.enum(["coding", "writing", "research", "summarization", "analysis", "planning", "creative", "other"]);
+export const categorySchema = z.enum(["coding", "writing", "research", "summarization", "analysis", "planning", "creative", "design", "other"]);
 export type PromptCategory = z.infer<typeof categorySchema>;
 export const savedCategorySchema = z.union([z.literal("uncategorized"), categorySchema]);
 export type SavedCategory = z.infer<typeof savedCategorySchema>;

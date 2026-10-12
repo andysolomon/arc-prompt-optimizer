@@ -7,6 +7,7 @@ import { ProgressPanel } from "@/components/optimize/progress-panel";
 import { PromptForm } from "@/components/optimize/prompt-form";
 import { ResultPanel } from "@/components/optimize/result-panel";
 import { REWRITE, useOptimizeSession } from "@/components/optimize/optimize-session-provider";
+import { getDesignExample } from "@/lib/design-examples";
 import { getPatternExample } from "@/lib/pattern-examples";
 import { MAX_PLAN_PATTERNS } from "@/lib/arc-core/core/index.js";
 
@@ -41,8 +42,10 @@ export function OptimizeView() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const name = new URLSearchParams(window.location.search).get("example");
-    const example = name ? getPatternExample(name) : undefined;
+    const params = new URLSearchParams(window.location.search);
+    const name = params.get("example");
+    const design = params.get("design");
+    const example = (name ? getPatternExample(name) : undefined) ?? (design ? getDesignExample(design) : undefined);
     if (example) {
       loadExample(example.prompt);
       router.replace("/", { scroll: false });
