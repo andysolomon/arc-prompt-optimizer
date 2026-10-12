@@ -16,25 +16,33 @@ describe("parseSseChunk", () => {
 });
 
 describe("steps", () => {
-  it("plans all pattern steps with or without the rewrite and judge", () => {
+  it("plans placeholder run steps with or without the rewrite and judge", () => {
     expect(planSteps(true, true).steps.map((s) => s.label)).toEqual([
-      "Rewrite the prompt",
-      "Render 11 candidates",
+      "Rewrite the prompt and plan the checks",
+      "Render candidates",
       "Run baseline",
       "Run rewrite",
-      "Run persona",
-      "Run few-shot",
-      "Run structured reasoning",
-      "Run template fill",
-      "Run critique",
-      "Run guardrail",
-      "Run decomposition",
-      "Run audience adaptation",
-      "Run boundary",
+      "Run up to 3 pattern variants",
       "Score outputs with Jev",
       "Rank candidates",
     ]);
-    expect(planSteps(false, false).steps).toHaveLength(12);
+    expect(planSteps(false, false).steps.map((s) => s.label)).toEqual(["Render candidates", "Run baseline", "Run up to 3 pattern variants", "Rank candidates"]);
+  });
+
+  it("adds revision rounds ahead of judging and ranking as the server reports them", () => {
+    let state = planSteps(true, true);
+    state = advanceSteps(state, { step: "rewrite", status: "rewritten" });
+    state = advanceSteps(state, { step: "render", candidateIds: ["b", "r", "c"], candidateLabels: ["Baseline", "Rewrite", "Critique"] });
+    state = advanceSteps(state, { step: "revise", status: "revised", round: 2, candidateId: "r2", candidateLabel: "Rewrite v2" });
+    expect(state.steps.map((s) => s.key)).toEqual(["rewrite", "render", "run:b", "run:r", "run:c", "revise:2", "run:r2", "judge", "rank"]);
+    expect(state.steps[5]!.label).toBe("Revise the prompt (round 2)");
+    expect(state.steps[6]!.label).toBe("Run rewrite v2");
+    expect(state.done).toContain("revise:2");
+    state = advanceSteps(state, { step: "run:r2" });
+    state = advanceSteps(state, { step: "revise", status: "failed", round: 3 });
+    expect(state.steps.map((s) => s.key)).toEqual(["rewrite", "render", "run:b", "run:r", "run:c", "revise:2", "run:r2", "revise:3", "judge", "rank"]);
+    expect(state.steps[7]!.label).toMatch(/failed/u);
+    expect(state.done).toEqual(["rewrite", "render", "revise:2", "run:r2", "revise:3"]);
   });
 
   it("replaces planned run steps with the rendered candidates and marks steps done by key", () => {

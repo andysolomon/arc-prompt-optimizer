@@ -1,6 +1,5 @@
-import { candidateCount, type StepEvent } from "@/lib/types";
-import { candidateLabel } from "@/lib/format";
-import { OPTIMIZE_PATTERNS } from "@/lib/pattern-candidates";
+import { MAX_PLAN_PATTERNS } from "@/lib/arc-core/core/index.js";
+import type { StepEvent } from "@/lib/types";
 
 export interface StepItem {
   readonly key: string;
@@ -16,14 +15,15 @@ const PLANNED_RUN = "planned-run:";
 
 /**
  * Steps shown before the server reports anything. Run steps are placeholders until the `render` event names
- * the actual candidates, so a failed rewrite never leaves the list misaligned.
+ * the actual candidates, so a failed rewrite never leaves the list misaligned. Revision rounds are added as the
+ * server reports them, since whether a round happens depends on the scores.
  */
 export function planSteps(judge: boolean, rewrite: boolean): StepState {
-  const runs = ["baseline", ...(rewrite ? ["rewrite"] : []), ...OPTIMIZE_PATTERNS.map((pattern) => candidateLabel(undefined, pattern.name).toLowerCase())];
+  const runs = ["baseline", ...(rewrite ? ["rewrite"] : []), `up to ${MAX_PLAN_PATTERNS} pattern variants`];
   return {
     steps: [
-      ...(rewrite ? [{ key: "rewrite", label: "Rewrite the prompt" }] : []),
-      { key: "render", label: `Render ${candidateCount(rewrite)} candidates` },
+      ...(rewrite ? [{ key: "rewrite", label: "Rewrite the prompt and plan the checks" }] : []),
+      { key: "render", label: "Render candidates" },
       ...runs.map((name) => ({ key: `${PLANNED_RUN}${name}`, label: `Run ${name}` })),
       ...(judge ? [{ key: "judge", label: "Score outputs with Jev" }] : []),
       { key: "rank", label: "Rank candidates" },
@@ -32,9 +32,19 @@ export function planSteps(judge: boolean, rewrite: boolean): StepState {
   };
 }
 
-/** Marks a server step done; the `render` event also swaps the planned run steps for the rendered candidates. */
+function insertBefore(steps: readonly StepItem[], keys: readonly string[], items: readonly StepItem[]): readonly StepItem[] {
+  const at = steps.findIndex((step) => keys.includes(step.key));
+  const index = at === -1 ? steps.length : at;
+  return [...steps.slice(0, index), ...items, ...steps.slice(index)];
+}
+
+/**
+ * Marks a server step done. The `render` event also swaps the planned run steps for the rendered candidates, and a
+ * `revise` event adds that round (and, when it produced a revision, the revision's run) ahead of judging and ranking.
+ */
 export function advanceSteps(state: StepState, event: StepEvent): StepState {
   let steps = state.steps;
+  let key: string = event.step;
   if (event.step === "render" && event.candidateIds !== undefined) {
     const ids = event.candidateIds;
     const labels = event.candidateLabels ?? ids;
@@ -45,8 +55,18 @@ export function advanceSteps(state: StepState, event: StepEvent): StepState {
       .map((step) => (step.key === "render" ? { key: "render", label: `Render ${ids.length} candidates` } : step));
     const insertAt = firstPlanned === -1 ? kept.length : firstPlanned;
     steps = [...kept.slice(0, insertAt), ...runs, ...kept.slice(insertAt)];
+  } else if (event.step === "revise") {
+    const round = event.round ?? 0;
+    key = `revise:${round}`;
+    const items: StepItem[] = [
+      { key, label: event.status === "failed" ? `Revise the prompt (round ${round}): failed, keeping the previous version` : `Revise the prompt (round ${round})` },
+    ];
+    if (event.status !== "failed" && event.candidateId !== undefined) {
+      items.push({ key: `run:${event.candidateId}`, label: `Run ${(event.candidateLabel ?? event.candidateId).toLowerCase()}` });
+    }
+    if (!steps.some((step) => step.key === key)) steps = insertBefore(steps, ["judge", "rank"], items);
   }
-  const done = state.done.includes(event.step) ? state.done : [...state.done, event.step];
+  const done = state.done.includes(key) ? state.done : [...state.done, key];
   return { steps, done };
 }
 
