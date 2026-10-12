@@ -158,6 +158,9 @@ describe("AiSdkCompletionAdapter", () => {
     const result = await adapter.complete({ prompt: "hi", fixtureId: "ignored" }, controller.signal);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ prompt: "hi", maxOutputTokens: 4096, abortSignal: controller.signal });
+    expect(calls[0]).not.toHaveProperty("temperature");
+    await adapter.complete({ prompt: "hi", temperature: 0.9 });
+    expect(calls[1]).toMatchObject({ prompt: "hi", temperature: 0.9 });
     expect(result.text).toBe("out");
     expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 20 });
     expect(result.costUsd).toBeCloseTo((10 * 3 + 20 * 15) / 1_000_000, 12);

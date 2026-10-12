@@ -202,6 +202,34 @@ Every prompt is length-checked before the first completion runs.
 
 The CLI, the Pi extension, and the `prompt-optimize` skill do not call it yet. The web app in `web/` does. The protocol is adapted from the prompt optimizer in [AI Engineering from Scratch](https://github.com/rohitg00/ai-engineering-from-scratch) under the MIT License; see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
+## Iterative refinement (library)
+
+`rewritePrompt` improves a draft once, without seeing how a model answers it, and `generateCandidates` only wraps the draft in fixed templates, so neither can get better on a second pass. `refinePrompt(request)` is the loop that can: it evaluates a prompt on a suite, shows the model what the outputs got wrong, samples revisions, keeps the best, and repeats.
+
+```ts
+const result = await refinePrompt({
+  adapter,
+  start: "Summarize this incident report for executives.",
+  suite,                 // the suite whose checks and judge rubric define "better"
+  judge,                 // optional SemanticJudgeAdapter; its rationale is shown to the model
+  rounds: 2,             // 1–4, default 2
+  variantsPerRound: 2,   // 1–4, default 2
+  temperature: 0.9,      // for the revision completions only; default 0.9
+  objective: DEFAULT_RANKING_OBJECTIVE,
+  model, signal, timeoutMs, maxOutputCharacters,
+  maxCompletions: 64,    // generations plus evaluation completions, default 256
+  onRound: (round) => console.log(round.round, round.improved),
+});
+```
+
+- Round 0 evaluates `start` (a prompt string, or a `PromptCandidate` whose id the result keeps). Pass `startEvaluation: { evaluation, outputs }` when you already evaluated it on `suite` to skip those completions.
+- Each round builds a meta-prompt with `buildRefinePrompt`: the current prompt, fenced like the rewrite draft, followed by an entity-escaped `<evidence>` block with one `<case>` per suite case (its input, an excerpt of the output, the checks that failed, and the judge score and rationale), worst cases first and capped at 12,000 characters, then any `<rejected_revisions>` from earlier rounds. The model replies in the rewrite's `<analysis>`, `<rewritten_prompt>`, `<changes>` format.
+- The round's variants are generated and evaluated concurrently. A revision becomes the new best only when it ranks strictly above the incumbent under `objective`; an exact tie keeps the incumbent. Revisions whose text duplicates an existing candidate, whose reply cannot be parsed, or whose completion fails are recorded as attempts and skip evaluation. Cancellation is rethrown.
+- The loop stops after `rounds`, or early with `stopReason: "perfect_score"` once the best combined quality is 1, or `"budget_exhausted"` when the next round would exceed `maxCompletions`.
+- The result holds every evaluated candidate (`refine-r<round>-v<variant>-<fingerprint>`, parent set to the candidate it revised), their evaluations, a ranking over all of them, the per-round attempts, and `completionsUsed`.
+
+On the preview suite every non-empty output ties, so the loop has nothing to climb without a judge or a suite with real criteria. `CompletionRequest` and `EvaluateOptions` also accept `temperature` now; the Pi adapter forwards it, the fixture adapter ignores it.
+
 ## Model selection
 
 **CLI**

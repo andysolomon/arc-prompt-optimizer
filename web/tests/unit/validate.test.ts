@@ -20,6 +20,17 @@ describe("validateOptimizeBody", () => {
     });
   });
 
+  it("accepts refine only when the server flag is on and the judge is requested", () => {
+    const body = { prompt: "p", model: all[0], judge: true, refine: { rounds: 2, variants: 2 } };
+    expect(validateOptimizeBody(body, all, true)).toMatchObject({ ok: true, value: { refine: { rounds: 2, variants: 2 } } });
+    expect(validateOptimizeBody(body, all)).toMatchObject({ ok: false, status: 400, message: "Refine is not enabled on this server." });
+    expect(validateOptimizeBody({ ...body, judge: false }, all, true)).toMatchObject({ ok: false, status: 400, message: /requires the Jev judge/u });
+    expect(validateOptimizeBody({ ...body, refine: { rounds: 4, variants: 1 } }, all, true)).toMatchObject({ ok: false, status: 400, message: "refine.rounds must be between 1 and 3." });
+    expect(validateOptimizeBody({ ...body, refine: { rounds: 1, variants: 0 } }, all, true)).toMatchObject({ ok: false, status: 400 });
+    expect(validateOptimizeBody({ ...body, refine: { rounds: 1.5, variants: 1 } }, all, true)).toMatchObject({ ok: false, status: 400 });
+    expect(validateOptimizeBody({ ...body, refine: "yes" }, all, true)).toMatchObject({ ok: false, status: 400 });
+  });
+
   it("rejects an empty or whitespace-only prompt with 400", () => {
     expect(validateOptimizeBody({ prompt: "", model: all[0], judge: true }, all)).toMatchObject({ ok: false, status: 400, message: "Prompt must not be empty." });
     expect(validateOptimizeBody({ prompt: "   \n", model: all[0], judge: true }, all)).toMatchObject({ ok: false, status: 400 });

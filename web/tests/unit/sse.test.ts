@@ -37,6 +37,17 @@ describe("steps", () => {
     expect(planSteps(false, false).steps).toHaveLength(12);
   });
 
+  it("plans one refine step per round before ranking and labels it with the round's outcome", () => {
+    const planned = planSteps(true, true, 2);
+    expect(planned.steps.slice(-3).map((s) => s.key)).toEqual(["refine:1", "refine:2", "rank"]);
+    expect(planned.steps.at(-2)!.label).toBe("Refine the best candidate, round 2");
+    const state = advanceSteps(planned, { step: "refine:1", improved: false });
+    expect(state.done).toEqual(["refine:1"]);
+    expect(state.steps.find((s) => s.key === "refine:1")!.label).toBe("Refine the best candidate, round 1 (no gain)");
+    expect(advanceSteps(state, { step: "refine:2", improved: true }).steps.find((s) => s.key === "refine:2")!.label).toBe("Refine the best candidate, round 2 (improved)");
+    expect(planSteps(true, true).steps.some((s) => s.key.startsWith("refine:"))).toBe(false);
+  });
+
   it("replaces planned run steps with the rendered candidates and marks steps done by key", () => {
     let state = planSteps(true, true);
     state = advanceSteps(state, { step: "rewrite", status: "failed" });

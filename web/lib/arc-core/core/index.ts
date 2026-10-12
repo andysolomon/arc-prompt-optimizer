@@ -72,6 +72,33 @@ export {
 } from "./rewrite.js";
 export type { RewriteOptions, RewriteOutcome, RewriteParse } from "./rewrite.js";
 export {
+  DEFAULT_REFINE_ROUNDS,
+  DEFAULT_REFINE_TEMPERATURE,
+  DEFAULT_REFINE_VARIANTS,
+  MAX_REFINE_EVIDENCE_CHARACTERS,
+  MAX_REFINE_OUTPUT_EXCERPT_CHARACTERS,
+  MAX_REFINE_REJECTED_CHARACTERS,
+  MAX_REFINE_ROUNDS,
+  MAX_REFINE_VARIANTS,
+  REFINE_PATTERN,
+  REFINE_PROTOCOL,
+  buildRefinePrompt,
+  evidenceFromEvaluation,
+  refineCandidate,
+  refinePrompt,
+} from "./refine.js";
+export type {
+  RefineAttempt,
+  RefineEvidenceCase,
+  RefinePromptInput,
+  RefineRejectedRevision,
+  RefineRequest,
+  RefineResult,
+  RefineRound,
+  RefineStartEvaluation,
+  RefineStopReason,
+} from "./refine.js";
+export {
   DEFAULT_RANKING_OBJECTIVE,
   combineQuality,
   rankCandidates,

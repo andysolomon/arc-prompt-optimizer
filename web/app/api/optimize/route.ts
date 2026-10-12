@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readServerEnv, mockProvidersEnabled } from "@/lib/env";
+import { readServerEnv, mockProvidersEnabled, refineEnabled } from "@/lib/env";
 import { availableModels } from "@/lib/models";
 import { runOptimization } from "@/lib/optimize-run";
 import { clientIp, rateLimitMessage, rateLimiterFor } from "@/lib/ratelimit";
@@ -8,7 +8,10 @@ import { validateOptimizeBody } from "@/lib/validate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-/** Four sequential completions at up to 60 s each plus the judge call. Requires Fluid compute or a Pro plan; Hobby caps at 60 s. */
+/**
+ * Rewrite, one parallel round of candidates, the judge call, and, with refine on, up to three refine rounds of
+ * generation plus evaluation. Requires Fluid compute or a Pro plan; Hobby caps at 60 s.
+ */
 export const maxDuration = 300;
 
 function wantsEventStream(request: Request): boolean {
@@ -42,7 +45,7 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "Request body must be JSON." }, { status: 400 });
   }
   const allowed = mockProvidersEnabled(env) ? MODEL_IDS : availableModels(process.env).map((model) => model.id);
-  const validation = validateOptimizeBody(body, allowed);
+  const validation = validateOptimizeBody(body, allowed, refineEnabled(env));
   if (!validation.ok) return NextResponse.json({ error: validation.message }, { status: validation.status });
   const input = validation.value;
 

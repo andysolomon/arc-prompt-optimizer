@@ -21,9 +21,12 @@ export function OptimizeView() {
     setModel,
     judge,
     setJudge,
+    refine,
+    setRefine,
     models,
     modelsLoaded,
     judgeAvailable,
+    refineAvailable,
     phase,
     setPhase,
     stepState,
@@ -34,6 +37,7 @@ export function OptimizeView() {
     setEdited,
     canRun,
     effectiveJudge,
+    refineSettings,
     currentModelLabel,
     cancelRun,
     startRun,
@@ -72,6 +76,9 @@ export function OptimizeView() {
         judge={judge}
         judgeAvailable={judgeAvailable}
         onJudgeChange={setJudge}
+        refine={refine}
+        refineAvailable={refineAvailable}
+        onRefineChange={setRefine}
         canRun={canRun}
         onRequestRun={() => setPhase("confirm")}
       />
@@ -95,6 +102,7 @@ export function OptimizeView() {
         modelLabel={currentModelLabel}
         judge={effectiveJudge}
         rewrite={REWRITE}
+        refine={refineSettings}
         onCancel={() => setPhase(result ? "done" : "idle")}
         onRun={() => void startRun()}
       />

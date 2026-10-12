@@ -7,6 +7,7 @@ import {
   normalizeCompletionRequest,
   throwIfCompletionAborted,
   validateCompletionResult,
+  validateTemperature,
 } from "../adapters/completion.js";
 import {
   MAX_CRITERION_TERM_CHARACTERS,
@@ -639,12 +640,15 @@ export interface EvaluateOptions {
   readonly maxOutputCharacters?: number;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
+  /** Sampling temperature passed to every completion; adapters that cannot set it ignore the hint. */
+  readonly temperature?: number;
 }
 
 function validateOptions(value: unknown): EvaluateOptions {
   if (value === undefined) return Object.freeze({});
   const options = expectRecord(value, "INVALID_EVALUATION", "Evaluate options");
-  rejectUnknownKeys(options, ["judge", "model", "maxOutputCharacters", "signal", "timeoutMs"], "INVALID_EVALUATION", "Evaluate options");
+  rejectUnknownKeys(options, ["judge", "model", "maxOutputCharacters", "signal", "timeoutMs", "temperature"], "INVALID_EVALUATION", "Evaluate options");
+  validateTemperature(readOwnField(options, "temperature"), "Evaluate option 'temperature'");
   const judge = readOwnField(options, "judge");
   if (
     judge !== undefined &&
@@ -759,11 +763,13 @@ function buildCompletionRequest(
   const prompt = buildEvaluationPrompt(candidate, evaluationCase);
   const model = readOwnField(options, "model") as string | undefined;
   const maxOutputCharacters = readOwnField(options, "maxOutputCharacters") as number | undefined;
+  const temperature = readOwnField(options, "temperature") as number | undefined;
   return {
     fixtureId: evaluationCase.completionFixtureId,
     ...(model === undefined ? {} : { model }),
     prompt,
     ...(maxOutputCharacters === undefined ? {} : { maxOutputCharacters }),
+    ...(temperature === undefined ? {} : { temperature }),
   };
 }
 
@@ -827,6 +833,7 @@ export async function evaluateCase(
       input: (readOwnField(checkedCase, "input") as string | undefined) ?? null,
       expectedOutput: (readOwnField(checkedCase, "expectedOutput") as string | undefined) ?? null,
       candidateOutput: text,
+      candidatePrompt: checkedCandidate.prompt.text,
     });
     judgeOutcome = request.status === "skipped" ? request.outcome : await runSemanticJudge(judge, request.request);
   }

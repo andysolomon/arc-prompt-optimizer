@@ -4,7 +4,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { defaultSettingsMiddleware, extractReasoningMiddleware, generateText, wrapLanguageModel, type LanguageModel } from "ai";
 import { MAX_COMPLETION_OUTPUT_CHARACTERS } from "@/lib/arc-core/adapters/index.js";
-import { REWRITE_PROTOCOL } from "@/lib/arc-core/core/index.js";
+import { REFINE_PROTOCOL, REWRITE_PROTOCOL } from "@/lib/arc-core/core/index.js";
 import type { CompletionAdapter, CompletionRequest, CompletionResult } from "@/lib/arc-core/core/index.js";
 import type { ServerEnv } from "@/lib/env";
 import { OPENAI_COMPATIBLE_BASE_URLS, getModel, isReasoningProvider, type ModelDefinition } from "@/lib/models";
@@ -75,6 +75,8 @@ export type GenerateTextFn = (args: {
   model: LanguageModel;
   prompt: string;
   maxOutputTokens: number;
+  /** Forwarded as requested; providers that reject it for a model (OpenAI reasoning models) drop it with a warning. */
+  temperature?: number;
   abortSignal?: AbortSignal;
 }) => Promise<{
   text: string;
@@ -144,6 +146,7 @@ export class AiSdkCompletionAdapter implements CompletionAdapter {
       model: this.#model,
       prompt: request.prompt,
       maxOutputTokens: outputCharacterLimitToMaxTokens(outputLimit, this.#reasoning),
+      ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
       ...(signal === undefined ? {} : { abortSignal: signal }),
     });
     return toCompletionResult({
@@ -177,7 +180,9 @@ export class MockCompletionAdapter implements CompletionAdapter {
     const firstLine = request.prompt.split("\n")[0] ?? "";
     const text = request.prompt.startsWith(REWRITE_PROTOCOL)
       ? mockRewriteReply(request.prompt)
-      : `Mock output ${this.#calls} for: ${firstLine.slice(0, 80)}`;
+      : request.prompt.startsWith(REFINE_PROTOCOL)
+        ? mockRefineReply(request.prompt, this.#calls)
+        : `Mock output ${this.#calls} for: ${firstLine.slice(0, 80)}`;
     return toCompletionResult({
       modelId: this.#modelId,
       text,
@@ -188,6 +193,27 @@ export class MockCompletionAdapter implements CompletionAdapter {
       outputLimit: request.maxOutputCharacters ?? MAX_COMPLETION_OUTPUT_CHARACTERS,
     });
   }
+}
+
+/** Canned reply to the refine meta-prompt: appends one numbered constraint to the fenced current prompt, distinct per call. */
+function mockRefineReply(metaPrompt: string, call: number): string {
+  const fenced = /(`{3,})\n([\s\S]*?)\n\1\n/u.exec(metaPrompt);
+  const current = fenced?.[2] ?? "";
+  return [
+    "<analysis>",
+    "- The output stayed vague where the prompt gave no measurable target.",
+    "</analysis>",
+    "",
+    "<rewritten_prompt>",
+    current,
+    "",
+    `Constraint ${call}: name the single most important fact first, then supporting detail.`,
+    "</rewritten_prompt>",
+    "",
+    "<changes>",
+    `1. Added constraint ${call} so the output leads with the key fact.`,
+    "</changes>",
+  ].join("\n");
 }
 
 /** Canned reply to the rewrite meta-prompt: wraps the fenced draft in a role, format, and constraints. */

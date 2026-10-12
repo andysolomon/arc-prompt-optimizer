@@ -74,12 +74,20 @@ export function ResultPanel({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [showReasons, setShowReasons] = useState(false);
+  const [showRefineReasons, setShowRefineReasons] = useState(false);
   const rows = buildRows(result, edited);
   const best = rows.find((row) => row.id === selectedId) ?? rows[0];
   if (best === undefined) return null;
   const judgeUsed = result.judge.status === "judged";
   const rewriteReport = result.rewrite.status === "rewritten" && result.rewrite.candidateId === best.id ? result.rewrite : undefined;
   const hasReasons = rewriteReport !== undefined && (rewriteReport.analysis.length > 0 || rewriteReport.changes.length > 0);
+  const refineReport = result.refine.status === "refined" ? result.refine : undefined;
+  // The refine attempt that produced the selected candidate, with the diagnosis the model gave for the change.
+  const refineAttempt = refineReport?.rounds
+    .flatMap((round) => round.attempts.map((attempt) => ({ round: round.round, attempt })))
+    .find(({ attempt }) => attempt.status === "evaluated" && attempt.candidateId === best.id);
+  const refineNotes = refineAttempt !== undefined && refineAttempt.attempt.status === "evaluated" ? refineAttempt.attempt : undefined;
+  const improvedRounds = refineReport?.rounds.filter((round) => round.improved).length ?? 0;
 
   const copy = async () => {
     try {
@@ -186,6 +194,46 @@ export function ResultPanel({
             +{best.added} −{best.removed} lines vs. original
           </span>
         </div>
+
+        {refineNotes && refineAttempt ? (
+          <Collapsible open={showRefineReasons} onOpenChange={setShowRefineReasons} className="border-t border-border">
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-b-[10px] px-4 py-2.5 text-[13px] font-medium transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                <span>
+                  Why it was refined (round {refineAttempt.round}, {refineNotes.changes.length} changes)
+                </span>
+                <ChevronDown aria-hidden="true" className={cn("size-4 transition-transform", showRefineReasons && "rotate-180")} />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="flex flex-col gap-3 px-4 pb-4 text-[13px] leading-relaxed">
+                {refineNotes.analysis.length > 0 ? (
+                  <div>
+                    <h3 className="m-0 mb-1 text-xs font-medium text-muted-foreground">What the previous output got wrong</h3>
+                    <ul className="m-0 list-disc space-y-0.5 pl-5">
+                      {refineNotes.analysis.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {refineNotes.changes.length > 0 ? (
+                  <div>
+                    <h3 className="m-0 mb-1 text-xs font-medium text-muted-foreground">Changes</h3>
+                    <ol className="m-0 list-decimal space-y-0.5 pl-5">
+                      {refineNotes.changes.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : null}
 
         {hasReasons && rewriteReport ? (
           <Collapsible open={showReasons} onOpenChange={setShowReasons} className="border-t border-border">
@@ -308,6 +356,18 @@ export function ResultPanel({
             {result.judge.status === "failed" ? (
               <p role="status" className="m-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
                 Jev judging failed, so this ranking uses deterministic checks only. Reason: {result.judge.reason}
+              </p>
+            ) : null}
+            {refineReport ? (
+              <p role="status" className="m-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+                Refined over {refineReport.rounds.length} {refineReport.rounds.length === 1 ? "round" : "rounds"}
+                {improvedRounds > 0 ? `; ${improvedRounds} ${improvedRounds === 1 ? "round" : "rounds"} beat the previous best` : "; no revision beat the first-pass winner"}
+                {refineReport.stopReason === "perfect_score" ? ". Stopped early at a perfect score." : refineReport.stopReason === "budget_exhausted" ? ". Stopped early at the completion budget." : "."}
+              </p>
+            ) : null}
+            {result.refine.status === "failed" ? (
+              <p role="status" className="m-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+                Refining failed, so this is the first-pass ranking. Reason: {result.refine.reason}
               </p>
             ) : null}
           </div>

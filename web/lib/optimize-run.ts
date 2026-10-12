@@ -1,20 +1,24 @@
 import "server-only";
 import {
   DEFAULT_RANKING_OBJECTIVE,
+  DEFAULT_REFINE_TEMPERATURE,
   PREVIEW_SUITE,
   aggregateCases,
   evaluateCandidate,
   rankCandidates,
+  refinePrompt,
   rewritePrompt,
 } from "@/lib/arc-core/core/index.js";
 import type {
   CandidateEvaluation,
   CaseEvaluation,
   EvaluateOptions,
+  EvaluationSuite,
   CompletionAdapter,
   CompletionRequest,
   CompletionResult,
   PromptCandidate,
+  SemanticJudgeAdapter,
 } from "@/lib/arc-core/core/index.js";
 import { AiSdkCompletionAdapter, MockCompletionAdapter } from "@/lib/adapter";
 import { mockProvidersEnabled, type ServerEnv } from "@/lib/env";
@@ -22,10 +26,12 @@ import { candidateLabel } from "@/lib/format";
 import { buildPatternCandidates } from "@/lib/pattern-candidates";
 import { getModel } from "@/lib/models";
 import { judgeWithJev, type JevEntry } from "@/lib/jev";
+import { JEV_RUBRIC, JevJudgeAdapter, MockJevJudgeAdapter } from "@/lib/jev-judge";
 import {
   JUDGE_RANKING_OBJECTIVE,
   type JudgeReport,
   type OptimizeRequest,
+  type RefineReport,
   type RewriteReport,
   type OptimizeResult,
   type StepEvent,
@@ -38,6 +44,12 @@ export const COMPLETION_TIMEOUT_MS = 60_000;
  */
 export const SLOW_COMPLETION_TIMEOUT_MS = 120_000;
 export const REWRITE_TIMEOUT_MS = 120_000;
+
+/** The preview case plus a judge rubric, so the core asks Jev about every candidate the refine loop produces. */
+export const REFINE_SUITE: EvaluationSuite = Object.freeze({
+  id: "prompt-optimize-refine",
+  cases: Object.freeze(PREVIEW_SUITE.cases.map((entry) => Object.freeze({ ...entry, judgeRubric: JEV_RUBRIC }))),
+});
 
 /** Per-completion timeout. Worst case per run: rewrite + one parallel round of candidates + judge ≤ 300 s. */
 export function completionTimeoutMs(model: OptimizeRequest["model"]): number {
@@ -81,6 +93,28 @@ async function evaluateConcurrently(
  * Records each candidate's output. Completions run concurrently, so the candidate is identified by its prompt
  * text (the preview suite has no case input, so the completion prompt is exactly the candidate text).
  */
+/** Live adapters take no offline fixture selector; evaluations carry one from the suite. */
+function liveRequest(request: CompletionRequest): CompletionRequest {
+  return {
+    prompt: request.prompt,
+    ...(request.model === undefined ? {} : { model: request.model }),
+    ...(request.maxOutputCharacters === undefined ? {} : { maxOutputCharacters: request.maxOutputCharacters }),
+    ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+  };
+}
+
+class LiveAdapter implements CompletionAdapter {
+  readonly #inner: CompletionAdapter;
+
+  constructor(inner: CompletionAdapter) {
+    this.#inner = inner;
+  }
+
+  async complete(request: CompletionRequest, signal?: AbortSignal): Promise<CompletionResult> {
+    return await this.#inner.complete(liveRequest(request), signal);
+  }
+}
+
 class RecordingAdapter implements CompletionAdapter {
   readonly #inner: CompletionAdapter;
   readonly #candidates: readonly PromptCandidate[];
@@ -97,13 +131,7 @@ class RecordingAdapter implements CompletionAdapter {
   }
 
   async complete(request: CompletionRequest, signal?: AbortSignal): Promise<CompletionResult> {
-    // Live adapters take no offline fixture selector.
-    const liveRequest: CompletionRequest = {
-      prompt: request.prompt,
-      ...(request.model === undefined ? {} : { model: request.model }),
-      ...(request.maxOutputCharacters === undefined ? {} : { maxOutputCharacters: request.maxOutputCharacters }),
-    };
-    const result = await this.#inner.complete(liveRequest, signal);
+    const result = await this.#inner.complete(liveRequest(request), signal);
     const candidate = this.#candidates.find((entry) => entry.prompt.text === request.prompt);
     if (candidate !== undefined) this.#onComplete(candidate, result.text);
     return result;
@@ -160,8 +188,9 @@ function mockJudge(entries: readonly JevEntry[]): JudgeReport {
 }
 
 /**
- * (rewrite) → render → run every candidate concurrently → (judge) → rank. Emits one step event as each step completes. Prompts and
- * outputs are held in memory for the duration of the request only and are never logged or persisted.
+ * (rewrite) → render → run every candidate concurrently → (judge) → (refine) → rank. Emits one step event as each
+ * step completes. Prompts and outputs are held in memory for the duration of the request only and are never
+ * logged or persisted.
  */
 export async function runOptimization(request: OptimizeRequest, options: RunOptions): Promise<OptimizeResult> {
   const modelAdapter = selectAdapter(request, options);
@@ -234,6 +263,63 @@ export async function runOptimization(request: OptimizeRequest, options: RunOpti
     options.emit({ step: "judge" });
   }
 
+  let refine: RefineReport = { status: "not_requested" };
+  let refineCompletions = 0;
+  if (request.refine !== undefined) {
+    if (judge.status !== "judged") {
+      refine = { status: "failed", reason: "Refine needs Jev scores to iterate on, and the judge did not run." };
+    } else {
+      // Iterate on whichever candidate Jev ranked first; the refine loop sees its output and verdict as evidence.
+      const firstPass = rankCandidates(evaluations, JUDGE_RANKING_OBJECTIVE);
+      const startId = firstPass[0]!.candidateId;
+      const start = candidates.find((candidate) => candidate.id === startId)!;
+      const startEvaluation = evaluations.find((entry) => entry.candidateId === startId)!;
+      const refineJudge: JevJudgeAdapter | MockJevJudgeAdapter & SemanticJudgeAdapter = mockProvidersEnabled(options.env)
+        ? new MockJevJudgeAdapter()
+        : new JevJudgeAdapter({
+            apiKey: options.env.TYPESAFE_API_KEY!,
+            signal: options.signal,
+            ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+          });
+      try {
+        const outcome = await refinePrompt({
+          adapter: new LiveAdapter(modelAdapter),
+          start,
+          suite: REFINE_SUITE,
+          startEvaluation: { evaluation: startEvaluation, outputs: { [PREVIEW_SUITE.cases[0]!.id]: outputs.get(startId) ?? "" } },
+          rounds: request.refine.rounds,
+          variantsPerRound: request.refine.variants,
+          temperature: DEFAULT_REFINE_TEMPERATURE,
+          judge: refineJudge,
+          objective: JUDGE_RANKING_OBJECTIVE,
+          model: request.model,
+          timeoutMs: completionTimeoutMs(request.model),
+          signal: options.signal,
+          onRound: (round) => options.emit({ step: `refine:${round.round}`, improved: round.improved }),
+        });
+        candidates = [...candidates, ...outcome.candidates.slice(1)];
+        evaluations = [...evaluations, ...outcome.evaluations.slice(1)];
+        judge = { ...judge, answers: { ...judge.answers, ...refineJudge.answers } };
+        refine = {
+          status: "refined",
+          startCandidateId: outcome.startCandidateId,
+          bestCandidateId: outcome.bestCandidateId,
+          rounds: outcome.rounds.map((round) => ({
+            ...round,
+            attempts: round.attempts.map((attempt) =>
+              attempt.status === "evaluated" ? { ...attempt, analysis: [...attempt.analysis], changes: [...attempt.changes] } : { ...attempt },
+            ),
+          })),
+          stopReason: outcome.stopReason,
+        };
+        refineCompletions = outcome.completionsUsed;
+      } catch (error) {
+        if (options.signal.aborted) throw error;
+        refine = { status: "failed", reason: error instanceof Error ? error.message : "Refine failed." };
+      }
+    }
+  }
+
   const ranking = rankCandidates(evaluations, judge.status === "judged" ? JUDGE_RANKING_OBJECTIVE : DEFAULT_RANKING_OBJECTIVE);
   options.emit({ step: "rank" });
 
@@ -244,7 +330,8 @@ export async function runOptimization(request: OptimizeRequest, options: RunOpti
     ranking,
     judge,
     rewrite,
-    completionsUsed: evaluation.completionsUsed + rewriteCompletions,
+    refine,
+    completionsUsed: evaluation.completionsUsed + rewriteCompletions + refineCompletions,
     model: request.model,
   };
 }

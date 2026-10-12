@@ -19,6 +19,7 @@ function result(ranking: RankedCandidate[], rewriteId: string | null): OptimizeR
       rewriteId === null
         ? { status: "failed", reason: "x" }
         : { status: "rewritten", candidateId: rewriteId, analysis: [], changes: [], measurements: { latencyMs: unknown, inputTokens: unknown, outputTokens: unknown, totalTokens: unknown, costUsd: unknown } },
+    refine: { status: "not_requested" },
     completionsUsed: 6,
     model: "minimax/MiniMax-M3",
   };

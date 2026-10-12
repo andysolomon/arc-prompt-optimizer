@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { candidateCount, completionCount } from "@/lib/types";
+import { candidateCount, completionCount, refineCompletionCount, type RefineSettings } from "@/lib/types";
 import { OPTIMIZE_PATTERNS } from "@/lib/pattern-candidates";
 
 export function confirmBody(rewrite: boolean): string {
@@ -16,6 +16,7 @@ export function ConfirmDialog({
   modelLabel,
   judge,
   rewrite,
+  refine,
   onCancel,
   onRun,
 }: {
@@ -23,6 +24,7 @@ export function ConfirmDialog({
   modelLabel: string;
   judge: boolean;
   rewrite: boolean;
+  refine?: RefineSettings | undefined;
   onCancel: () => void;
   onRun: () => void;
 }) {
@@ -43,11 +45,19 @@ export function ConfirmDialog({
             </>
           ) : null}
           <dt className="text-muted-foreground">Completions</dt>
-          <dd className="m-0">{completionCount(rewrite)}</dd>
+          <dd className="m-0">{refine ? `${completionCount(rewrite)}, then up to ${refineCompletionCount(refine)} more while refining` : completionCount(rewrite)}</dd>
           <dt className="text-muted-foreground">Judge</dt>
           <dd className="m-0">
             {judge ? `Jev (TypeSafe) · 1 request, ${candidateCount(rewrite)} Score questions` : "Deterministic checks only"}
           </dd>
+          {refine ? (
+            <>
+              <dt className="text-muted-foreground">Refine</dt>
+              <dd className="m-0">
+                {refine.rounds} rounds × {refine.variants} revisions of the top candidate, each judged by Jev
+              </dd>
+            </>
+          ) : null}
         </dl>
         <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
           <Button type="button" variant="outline" className="h-9 px-3.5" onClick={onCancel}>

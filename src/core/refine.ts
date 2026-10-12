@@ -31,7 +31,6 @@ import type {
   CaseEvaluation,
   CompletionAdapter,
   CompletionRequest,
-  EvaluationCase,
   EvaluationSuite,
   OperationalMeasurements,
   PromptCandidate,

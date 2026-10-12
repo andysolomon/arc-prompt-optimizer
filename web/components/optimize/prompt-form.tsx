@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCharacterCount } from "@/lib/format";
-import { MAX_PROMPT_CHARACTERS, type ModelInfo } from "@/lib/types";
+import { MAX_PROMPT_CHARACTERS, REFINE_DEFAULT_ROUNDS, REFINE_DEFAULT_VARIANTS, type ModelInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export function PromptForm({
@@ -20,6 +20,9 @@ export function PromptForm({
   judge,
   judgeAvailable,
   onJudgeChange,
+  refine,
+  refineAvailable,
+  onRefineChange,
   canRun,
   onRequestRun,
 }: {
@@ -32,6 +35,10 @@ export function PromptForm({
   judge: boolean;
   judgeAvailable: boolean;
   onJudgeChange: (value: boolean) => void;
+  refine: boolean;
+  /** The server flag is on; the switch is still disabled until the judge is on. */
+  refineAvailable: boolean;
+  onRefineChange: (value: boolean) => void;
   canRun: boolean;
   onRequestRun: () => void;
 }) {
@@ -86,6 +93,7 @@ export function PromptForm({
           </Select>
         </div>
         <JudgeSwitch judge={judge} available={judgeAvailable} onChange={onJudgeChange} />
+        {refineAvailable ? <RefineSwitch refine={refine} available={judgeAvailable && judge} onChange={onRefineChange} /> : null}
         <Button type="submit" disabled={!canRun} className="ml-auto h-9 self-end px-4 text-sm">
           Optimize
         </Button>
@@ -97,6 +105,40 @@ export function PromptForm({
         </p>
       ) : null}
     </form>
+  );
+}
+
+function RefineSwitch({ refine, available, onChange }: { refine: boolean; available: boolean; onChange: (value: boolean) => void }) {
+  const control = (
+    <div className={cn("flex h-9 items-center gap-2.5 self-end", !available && "opacity-60")}>
+      <Switch
+        id="refine"
+        checked={available && refine}
+        disabled={!available}
+        onCheckedChange={onChange}
+        aria-describedby="refine-description"
+        className="h-5 w-9 data-[state=unchecked]:bg-border [&>span]:size-4 [&>span]:data-[state=checked]:translate-x-4"
+      />
+      <label htmlFor="refine" className="flex cursor-pointer flex-col items-start text-sm leading-tight">
+        <span>Refine</span>
+        <span id="refine-description" className="text-[11px] text-muted-foreground">
+          {REFINE_DEFAULT_ROUNDS} rounds of {REFINE_DEFAULT_VARIANTS} revisions on Jev feedback
+        </span>
+      </label>
+    </div>
+  );
+  if (available) return control;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          {control}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="text-xs">
+        Turn on the Jev judge to refine: without it every preview candidate ties.
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

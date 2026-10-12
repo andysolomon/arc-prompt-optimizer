@@ -42,7 +42,7 @@ The harness workflow has trade-offs. The same agent writes the variants and prod
 
 ### Web app
 
-The [`web/`](web/README.md) directory holds a Next.js frontend for Vercel. Paste a prompt, pick a model from Anthropic, OpenAI, Google, MiniMax, or OpenCode Go, confirm, and the model first rewrites your prompt with the core's `rewritePrompt`, then the rewrite and the four preview candidates run through the core evaluation and ranking, optionally judged by TypeSafe's Jev. See [web/README.md](web/README.md) for setup, environment variables, and the deploy button.
+The [`web/`](web/README.md) directory holds a Next.js frontend for Vercel. Paste a prompt, pick a model from Anthropic, OpenAI, Google, MiniMax, or OpenCode Go, confirm, and the model first rewrites your prompt with the core's `rewritePrompt`, then the rewrite and the four preview candidates run through the core evaluation and ranking, optionally judged by TypeSafe's Jev. With `ARC_REFINE_ENABLED=1` it can also iterate: the core's `refinePrompt` feeds the winner's output and Jev verdict back to the model for a bounded number of revision rounds. See [web/README.md](web/README.md) for setup, environment variables, and the deploy button.
 
 ### Standalone CLI
 

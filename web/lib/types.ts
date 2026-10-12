@@ -44,6 +44,24 @@ export function candidateCount(rewrite: boolean): number {
   return 1 + OPTIMIZE_PATTERNS.length + (rewrite ? 1 : 0);
 }
 
+/** Bounds for the refine loop as offered by the web app; the core allows up to 4 of each. */
+export const REFINE_MAX_ROUNDS = 3;
+export const REFINE_MAX_VARIANTS = 3;
+export const REFINE_DEFAULT_ROUNDS = 2;
+export const REFINE_DEFAULT_VARIANTS = 2;
+
+/** Upper bound on extra completions the refine loop may make: one generation plus one run per variant per round. */
+export function refineCompletionCount(refine: RefineSettings | undefined): number {
+  return refine === undefined ? 0 : refine.rounds * refine.variants * 2;
+}
+
+export const refineSettingsSchema = z.object({
+  rounds: z.number({ error: "refine.rounds must be a number." }).int().min(1).max(REFINE_MAX_ROUNDS, { error: `refine.rounds must be between 1 and ${REFINE_MAX_ROUNDS}.` }),
+  variants: z.number({ error: "refine.variants must be a number." }).int().min(1).max(REFINE_MAX_VARIANTS, { error: `refine.variants must be between 1 and ${REFINE_MAX_VARIANTS}.` }),
+});
+
+export type RefineSettings = z.infer<typeof refineSettingsSchema>;
+
 export const optimizeRequestSchema = z.object({
   prompt: z
     .string({ error: "Prompt must be a string." })
@@ -55,6 +73,8 @@ export const optimizeRequestSchema = z.object({
   judge: z.boolean({ error: "judge must be a boolean." }),
   /** Ask the model to rewrite the prompt first and rank the rewrite as an extra candidate. Defaults to true. */
   rewrite: z.boolean({ error: "rewrite must be a boolean." }).default(true),
+  /** Iterate on the top-ranked candidate with Jev feedback. Requires `judge: true` and the server flag. */
+  refine: refineSettingsSchema.optional(),
 });
 
 export type OptimizeRequest = z.infer<typeof optimizeRequestSchema>;
@@ -199,6 +219,50 @@ export const rewriteReportSchema = z.discriminatedUnion("status", [
 
 export type RewriteReport = z.infer<typeof rewriteReportSchema>;
 
+export const refineAttemptSchema = z.discriminatedUnion("status", [
+  z.object({
+    variantIndex: z.number(),
+    status: z.literal("evaluated"),
+    candidateId: z.string(),
+    analysis: z.array(z.string()),
+    changes: z.array(z.string()),
+    measurements: z.object({
+      latencyMs: measurementSchema,
+      inputTokens: measurementSchema,
+      outputTokens: measurementSchema,
+      totalTokens: measurementSchema,
+      costUsd: measurementSchema,
+    }),
+  }),
+  z.object({ variantIndex: z.number(), status: z.literal("duplicate"), candidateId: z.string() }),
+  z.object({ variantIndex: z.number(), status: z.literal("invalid"), reason: z.string() }),
+  z.object({ variantIndex: z.number(), status: z.literal("failed"), reason: z.string() }),
+]);
+
+export const refineRoundSchema = z.object({
+  round: z.number(),
+  parentCandidateId: z.string(),
+  attempts: z.array(refineAttemptSchema),
+  bestCandidateId: z.string(),
+  improved: z.boolean(),
+});
+
+export type RefineRoundReport = z.infer<typeof refineRoundSchema>;
+
+export const refineReportSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("not_requested") }),
+  z.object({
+    status: z.literal("refined"),
+    startCandidateId: z.string(),
+    bestCandidateId: z.string(),
+    rounds: z.array(refineRoundSchema),
+    stopReason: z.enum(["rounds_exhausted", "perfect_score", "budget_exhausted"]),
+  }),
+  z.object({ status: z.literal("failed"), reason: z.string() }),
+]);
+
+export type RefineReport = z.infer<typeof refineReportSchema>;
+
 export const optimizeResultSchema = z.object({
   baselineCandidateId: z.string(),
   candidates: z.array(promptCandidateSchema),
@@ -206,6 +270,7 @@ export const optimizeResultSchema = z.object({
   ranking: z.array(rankedCandidateSchema),
   judge: judgeReportSchema,
   rewrite: rewriteReportSchema,
+  refine: refineReportSchema,
   completionsUsed: z.number(),
   model: z.enum(MODEL_IDS),
 });
@@ -221,13 +286,14 @@ export interface OptimizeResult {
   readonly ranking: readonly RankedCandidate[];
   readonly judge: JudgeReport;
   readonly rewrite: RewriteReport;
-  /** Every completion requested from the model, including the rewrite. */
+  readonly refine: RefineReport;
+  /** Every completion requested from the model, including the rewrite and refine generations. */
   readonly completionsUsed: number;
   readonly model: ModelId;
 }
 
-/** Fixed step order of a run. `run:<candidateId>` repeats once per candidate. */
-export type StepName = "rewrite" | "render" | `run:${string}` | "judge" | "rank";
+/** Fixed step order of a run. `run:<candidateId>` repeats once per candidate; `refine:<round>` once per refine round. */
+export type StepName = "rewrite" | "render" | `run:${string}` | "judge" | `refine:${number}` | "rank";
 
 export type StepEvent = {
   readonly step: StepName;
@@ -237,6 +303,8 @@ export type StepEvent = {
   readonly candidateLabels?: readonly string[];
   /** Sent with the `rewrite` step. */
   readonly status?: "rewritten" | "failed";
+  /** Sent with each `refine:<round>` step: whether that round produced a better candidate. */
+  readonly improved?: boolean;
 };
 
 export const modelInfoSchema = z.object({
@@ -250,6 +318,8 @@ export type ModelInfo = z.infer<typeof modelInfoSchema>;
 export const modelsResponseSchema = z.object({
   models: z.array(modelInfoSchema),
   judgeAvailable: z.boolean(),
+  /** The server flag is on; the refine loop also needs the judge. */
+  refineAvailable: z.boolean().default(false),
 });
 
 export type ModelsResponse = z.infer<typeof modelsResponseSchema>;
