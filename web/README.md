@@ -14,7 +14,7 @@ With `TYPESAFE_API_KEY` configured, “Suggest with Jev” sends only the editor
 
 ## Stack
 
-Next.js 15 (App Router, TypeScript, Node route handlers), Tailwind CSS v4, shadcn/ui (zinc), Geist Sans and Geist Mono via `geist`, `next-themes`, Vercel AI SDK (`ai` with `@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google`), Zod, `@upstash/ratelimit`, Auth.js (`next-auth` v5) with Google and X, Vitest, Playwright. Package manager is pnpm; Node 22 or newer.
+Next.js 15 (App Router, TypeScript, Node route handlers), Tailwind CSS v4, shadcn/ui (zinc), Geist Sans and Geist Mono via `geist`, `next-themes`, Vercel AI SDK (`ai` with `@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google`), Zod, `@upstash/ratelimit`, Clerk (`@clerk/nextjs`) for accounts, Vitest, Playwright. Package manager is pnpm; Node 22 or newer.
 
 ## Setup
 
@@ -48,31 +48,27 @@ The first Playwright run needs a browser: `pnpm exec playwright install chromium
 | `OPENCODE_API_KEY` | OpenCode Go subscription key. Enables DeepSeek V4 Pro, GLM-5.3, Kimi K2.6, and Qwen3.7 Plus through `https://opencode.ai/zen/go/v1`. |
 | `TYPESAFE_API_KEY` | Enables the "Judge with Jev" switch and Library category suggestions. Manual saving and categorization work without it. |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Optional shared store for the per-IP rate limit (`KV_REST_API_URL` / `KV_REST_API_TOKEN` from Vercel KV are accepted too). Without them the limit lives in process memory, per instance. |
-| `AUTH_SECRET` | Signs the session cookie. Generate one with `openssl rand -base64 32`. Sign-in is hidden without it. |
-| `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Google OAuth client for "Continue with Google". |
-| `AUTH_TWITTER_ID`, `AUTH_TWITTER_SECRET` | X OAuth 2.0 client for "Continue with X". |
-| `AUTH_URL` | Optional canonical origin, for a self-hosted deployment behind a proxy that rewrites `Host`. Vercel and local development need nothing. |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Enable accounts through [Clerk](https://clerk.com). Both are required; with either missing, sign-in is hidden and the Clerk middleware is a no-op. |
 | `ARC_MOCK_PROVIDERS` | Test-only. `1` serves canned completions and judge answers. Ignored when `VERCEL_ENV=production`. |
 
 The app starts with any subset of keys. `GET /api/models` returns only the models whose provider key is present; the model select is populated from it.
 
 ## Accounts
 
-Visitors can sign in with a Google or an X account. The header shows **Sign in** when signed out and the account avatar, linking to `/account`, when signed in; `/account` shows the profile the provider returned and a **Sign out** button. Sessions are stateless [Auth.js](https://authjs.dev) JWTs in an HTTP-only cookie, valid for 30 days; there is no database, so nothing about a user is stored on the server, and the same person signing in with Google and with X gets two separate accounts (`session.user.id` is `provider:providerAccountId`). The optimizer, library, pattern catalog, and examples do not require an account.
+Visitors can sign in with a Google or an X account through [Clerk](https://clerk.com). The header shows **Sign in** when signed out and Clerk's user button, with account management and sign-out, when signed in. `/sign-in` hosts Clerk's prebuilt `<SignIn>` component in combined mode, so a first visit with Google or X creates the account and later visits sign in to it. Clerk stores the users; the app has no database and keeps no user data of its own. Pages stay statically rendered: the auth state is resolved on the client, and the `clerkMiddleware` in `middleware.ts` attaches the session to every request so `auth()` works in route handlers and server components when a feature needs it. The optimizer, library, pattern catalog, and examples do not require an account.
 
-Sign-in appears only when `AUTH_SECRET` and at least one provider's credentials are set; a provider without credentials drops off the sign-in page, like a model provider without a key. Register these callback URLs with the providers, replacing the host:
+Accounts appear only when both `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` are set. To configure them:
 
-| Provider | Where | Callback URL |
-| - | - | - |
-| Google | [Google Cloud console](https://console.cloud.google.com/apis/credentials), OAuth client ID of type *Web application* | `https://<host>/api/auth/callback/google` |
-| X | [X developer portal](https://developer.x.com/en/portal/dashboard), app with *User authentication settings* set to OAuth 2.0 and a *Web App* type | `https://<host>/api/auth/callback/twitter` |
+1. In the [Clerk dashboard](https://dashboard.clerk.com), open your application and copy both keys from **API keys** into `.env.local` (and into Vercel for a deployment).
+2. Under **User & authentication → Social connections**, enable **Google** and **X / Twitter**. Development instances can use Clerk's shared OAuth credentials; a production instance needs your own OAuth client for each provider and a verified domain. Clerk's dashboard shows the callback URL to register with each provider.
+3. Optionally turn off other sign-in methods there so the sign-in card shows only the two social buttons.
 
-Add `http://localhost:3000/api/auth/callback/...` too for local development. X's OAuth 2.0 user endpoint does not return an email address, so X accounts show "Not shared by X" on the account page. The Auth.js routes live under `/api/auth/*`; with sign-in unconfigured they return 404.
+Clerk's prebuilt components are styled through the `shadcn` theme from `@clerk/ui/themes`, which reads this app's CSS variables and so follows light and dark mode. The Clerk SDK collects telemetry on development instances; set `CLERK_TELEMETRY_DISABLED=1` to opt out.
 
 ## Deploy on Vercel
 
 1. Import the repository and set **Root Directory** to `web`. The deploy button above does this for you.
-2. Add the environment variables you have. For accounts, set `AUTH_SECRET` and the provider credentials, and register `https://<your-vercel-domain>/api/auth/callback/google` and `/twitter` with the providers. Preview deployments have their own hostnames, so register those too or test sign-in on production only.
+2. Add the environment variables you have. For accounts, add the two Clerk keys; a production Clerk instance also needs the deployment's domain configured in the Clerk dashboard, while a development instance works on any hostname, including preview deployments.
 3. `/api/optimize` declares `maxDuration = 300`. A run is one rewrite completion, then the eleven candidate completions in parallel, then one judge call, so it routinely takes longer than a minute. Enable [Fluid compute](https://vercel.com/docs/fluid-compute) or use a Pro plan; without it, Hobby functions are capped at 60 s and long runs are cut off.
 
 `vercel.json` only pins the install and build commands; no rewrites or custom routing are needed.
