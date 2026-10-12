@@ -5,12 +5,18 @@ import {
   CompletionCancelledError,
   MAX_REWRITE_DRAFT_CHARACTERS,
   PREVIEW_SUITE,
+  REVISE_FORMAT_REMINDER,
+  REVISE_PROTOCOL,
+  REWRITE_FORMAT_REMINDER,
   REWRITE_PROTOCOL,
   baselineCandidate,
   buildPreviewCandidates,
+  buildRevisePrompt,
   buildRewritePrompt,
   evaluateSuite,
   parseRewriteOutput,
+  revisePrompt,
+  revisionCandidate,
   rewriteCandidate,
   rewritePrompt,
 } from "../dist/core/index.js";
@@ -133,16 +139,189 @@ test("rewritePrompt makes one completion and returns a candidate the evaluator a
   assert.equal(runner.requests.at(-1).prompt, "You are an incident analyst. Summarize in 5 bullets.");
 });
 
-test("rewritePrompt reports an unparseable reply with its measurements", async () => {
-  const outcome = await rewritePrompt(new ScriptedAdapter("No tags here.", { latencyMs: 5 }), DRAFT);
+test("rewritePrompt retries once with a format reminder and reports a still-unparseable reply with its measurements", async () => {
+  const adapter = new ScriptedAdapter("No tags here.", { latencyMs: 5 });
+  const outcome = await rewritePrompt(adapter, DRAFT);
   assert.equal(outcome.status, "invalid");
+  assert.equal(outcome.attempts, 2);
+  assert.equal(adapter.requests.length, 2);
+  assert.ok(!adapter.requests[0].prompt.startsWith(REWRITE_FORMAT_REMINDER), "first attempt carries no reminder");
+  assert.ok(adapter.requests[1].prompt.startsWith(REWRITE_FORMAT_REMINDER), "retry starts with the reminder");
+  assert.ok(adapter.requests[1].prompt.endsWith("```\n" + DRAFT + "\n```"));
   assert.match(outcome.reason, /rewritten_prompt/u);
   assert.deepEqual(outcome.measurements.latencyMs, { status: "measured", value: 5 });
+  const single = new ScriptedAdapter("No tags here.");
+  assert.equal((await rewritePrompt(single, DRAFT, { maxAttempts: 1 })).attempts, 1);
+  assert.equal(single.requests.length, 1);
+});
+
+test("rewritePrompt caps all attempts by totalTimeoutMs and skips a retry that would not fit", async () => {
+  const slowGarbage = {
+    requests: [],
+    async complete(request) {
+      this.requests.push(request);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return { text: "garbage" };
+    },
+  };
+  const outcome = await rewritePrompt(slowGarbage, DRAFT, { timeoutMs: 1_000, totalTimeoutMs: 40 });
+  assert.equal(outcome.status, "invalid");
+  assert.equal(outcome.attempts, 1, "the retry is skipped when under MIN_RETRY_TIMEOUT_MS remains");
+  assert.equal(slowGarbage.requests.length, 1);
+  await assert.rejects(rewritePrompt(slowGarbage, DRAFT, { totalTimeoutMs: 0 }), { code: "INVALID_CANDIDATE" });
+});
+
+test("rewritePrompt succeeds on the retry when the first reply is malformed", async () => {
+  let calls = 0;
+  const adapter = {
+    requests: [],
+    async complete(request) {
+      this.requests.push(request);
+      calls += 1;
+      return { text: calls === 1 ? "Sure! Here is a better prompt." : reply("You are an analyst.") };
+    },
+  };
+  const outcome = await rewritePrompt(adapter, DRAFT);
+  assert.equal(outcome.status, "rewritten");
+  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.candidate.prompt.text, "You are an analyst.");
+});
+
+test("parseRewriteOutput accepts markdown headings in place of the tags", () => {
+  const text = [
+    "## Analysis",
+    "- No role.",
+    "- No format.",
+    "",
+    "## Rewritten Prompt",
+    "You are a coach.",
+    "",
+    "Review the app. Changes to the roster are out of scope.",
+    "",
+    "**Changes:**",
+    "1. Added a role.",
+    "",
+    "### Plan",
+    "```json",
+    '{"task_type": "analysis-review", "temperature": 0.3, "criteria": {"max_words": 400, "required_keywords": ["roster"]}}',
+    "```",
+  ].join("\n");
+  const parsed = parseRewriteOutput(text);
+  assert.equal(parsed.status, "parsed");
+  assert.equal(parsed.rewrittenPrompt, "You are a coach.\n\nReview the app. Changes to the roster are out of scope.");
+  assert.deepEqual(parsed.analysis, ["No role.", "No format."]);
+  assert.deepEqual(parsed.changes, ["Added a role."]);
+  assert.equal(parsed.plan.taskType, "analysis_review");
+  assert.equal(parsed.plan.temperature, 0.3);
+  assert.deepEqual(parsed.plan.criteria, { maxWords: 400, requiredKeywords: ["roster"], forbiddenPhrases: [] });
+});
+
+test("parseRewriteOutput names the output limit when the reply was cut off", () => {
+  const cut = parseRewriteOutput("<analysis>\n- x\n</analysis>\n<rewritten_prompt>\nYou are", { finishReason: "length" });
+  assert.equal(cut.status, "invalid");
+  assert.match(cut.reason, /never closes it \(the reply was cut off at the output limit\)/u);
+  const early = parseRewriteOutput("<analysis>\n- x\n- y", { finishReason: "length" });
+  assert.match(early.reason, /cut off at the output limit before any/u);
+  assert.equal(parseRewriteOutput("   ").reason, "rewrite reply is empty");
+});
+
+test("parseRewriteOutput carries the plan from a tagged reply and tolerates a missing or broken one", () => {
+  const withPlan = parseRewriteOutput(
+    reply("P") +
+      "\n<plan>\n" +
+      JSON.stringify({
+        task_type: "summarization",
+        temperature: "0.3",
+        criteria: { max_words: 150, expected_format: "bullet points", required_keywords: ["revenue", " Revenue ", ""], forbidden_phrases: ["as an AI"] },
+        patterns: [
+          { pattern: "persona", variables: { role: "a CFO", experience: "10 years", style: "terse", priority: "accuracy" } },
+          { pattern: "chain_of_thought" },
+          { pattern: "guardrail", variables: { role: "x" } },
+          { pattern: "bogus" },
+        ],
+      }) +
+      "\n</plan>",
+  );
+  assert.equal(withPlan.status, "parsed");
+  assert.deepEqual(withPlan.plan, {
+    taskType: "summarization",
+    temperature: 0.3,
+    criteria: { expectedFormat: "bullet_list", maxWords: 150, requiredKeywords: ["revenue"], forbiddenPhrases: ["as an AI"] },
+    patterns: [
+      { pattern: "persona", variables: { role: "a CFO", experience: "10 years", style: "terse", priority: "accuracy" } },
+      { pattern: "chain_of_thought", variables: {} },
+    ],
+  });
+  assert.equal(parseRewriteOutput(reply("P")).plan, undefined);
+  assert.equal(parseRewriteOutput(reply("P") + "\n<plan>\nnot json\n</plan>").plan, undefined);
+  const empty = parseRewriteOutput(reply("P") + "\n<plan>\n{}\n</plan>").plan;
+  assert.deepEqual(empty, { taskType: "other", criteria: { requiredKeywords: [], forbiddenPhrases: [] }, patterns: [] });
+});
+
+test("buildRewritePrompt lists every catalog pattern with its variables for the plan", () => {
+  const prompt = buildRewritePrompt(DRAFT);
+  assert.ok(prompt.includes("- persona:"), "persona is listed");
+  assert.ok(prompt.includes("Variables: role, experience, style, priority."), "task variable is omitted from persona");
+  assert.ok(prompt.includes("- chain_of_thought:"), "chain_of_thought is listed");
+  assert.ok(!prompt.includes("Variables: problem"), "task-only patterns list no variables");
+  assert.ok(prompt.includes("analysis_review"), "task types are listed");
+});
+
+test("revisionCandidate points at its parent and carries the round", () => {
+  const parent = rewriteCandidate(DRAFT, "You are an analyst.");
+  const revision = revisionCandidate(parent, "You are an analyst. Use at most 100 words.", 2);
+  assert.match(revision.id, /^rewrite-v2-[0-9a-f]{8}$/u);
+  assert.equal(revision.parentCandidateId, parent.id);
+  assert.deepEqual(revision.metadata, { label: "rewrite_v2", revision: 2 });
+  assert.equal(revision.prompt.pattern, "rewrite");
+  assert.throws(() => revisionCandidate(parent, "x", 1), { code: "INVALID_CANDIDATE" });
+});
+
+test("buildRevisePrompt names the failed checks and fences the draft, prompt, and output", () => {
+  const prompt = buildRevisePrompt({
+    draft: DRAFT,
+    prompt: "You are an analyst.",
+    output: "A ".repeat(1_000),
+    failedChecks: [{ criterion: "max_words", expected: 100, actual: 1_000 }],
+  });
+  assert.ok(prompt.startsWith(REVISE_PROTOCOL));
+  assert.ok(prompt.includes('- max_words: expected 100, got 1000'));
+  assert.ok(prompt.includes("```\n" + DRAFT + "\n```"));
+  assert.ok(prompt.includes("```\nYou are an analyst.\n```"));
+  assert.ok(prompt.includes("(beginning only)"));
+  assert.ok(prompt.length < REVISE_PROTOCOL.length + 2_200, "output excerpt is bounded");
+  assert.throws(() => buildRevisePrompt({ draft: DRAFT, prompt: "p", output: "", failedChecks: [] }), { code: "INVALID_CANDIDATE" });
+});
+
+test("revisePrompt sends only the failed checks and returns a revision of the candidate", async () => {
+  const parent = rewriteCandidate(DRAFT, "You are an analyst.");
+  const adapter = new ScriptedAdapter(reply("You are an analyst. Reply in at most 100 words.", { changes: "1. Added a word limit." }));
+  const outcome = await revisePrompt(adapter, {
+    draft: DRAFT,
+    candidate: parent,
+    round: 2,
+    output: "long output",
+    checks: [
+      { id: "max_words", criterion: "max_words", weight: 1, passed: false, expected: 100, actual: 180 },
+      { id: "format", criterion: "format", weight: 1, passed: true, expected: "bullet_list", actual: true },
+    ],
+  });
+  assert.equal(outcome.status, "rewritten");
+  assert.equal(outcome.attempts, 1);
+  assert.equal(outcome.candidate.parentCandidateId, parent.id);
+  assert.equal(outcome.candidate.metadata.revision, 2);
+  assert.deepEqual(outcome.changes, ["Added a word limit."]);
+  assert.ok(adapter.requests[0].prompt.includes("max_words"));
+  assert.ok(!adapter.requests[0].prompt.includes("bullet_list"), "passed checks are not sent");
+  const retrying = new ScriptedAdapter("nope");
+  const invalid = await revisePrompt(retrying, { draft: DRAFT, candidate: parent, round: 2, output: "", checks: [{ id: "max_words", criterion: "max_words", weight: 1, passed: false, expected: 1, actual: 2 }] });
+  assert.equal(invalid.status, "invalid");
+  assert.ok(retrying.requests[1].prompt.startsWith(REVISE_FORMAT_REMINDER));
 });
 
 test("rewritePrompt reports adapter errors and timeouts as failures", async () => {
   const failing = { complete: async () => Promise.reject(new Error("provider down")) };
-  assert.deepEqual(await rewritePrompt(failing, DRAFT), { status: "failed", reason: "provider down" });
+  assert.deepEqual(await rewritePrompt(failing, DRAFT), { status: "failed", reason: "provider down", attempts: 1 });
   const slow = { complete: () => new Promise((resolve) => setTimeout(() => resolve({ text: reply("late") }), 200)) };
   const timedOut = await rewritePrompt(slow, DRAFT, { timeoutMs: 10 });
   assert.equal(timedOut.status, "failed");

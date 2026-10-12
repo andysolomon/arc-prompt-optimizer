@@ -3,7 +3,7 @@ import { DESIGN_EXAMPLES, DESIGN_GROUPS, getDesignExample } from "@/lib/design-e
 import { buildPatternCandidates } from "@/lib/pattern-candidates";
 import { PATTERN_EXAMPLES } from "@/lib/pattern-examples";
 import { PROMPT_CATEGORIES, categorySchema } from "@/lib/prompt-library";
-import { candidateCount, MAX_PROMPT_CHARACTERS } from "@/lib/types";
+import { candidateRange, MAX_PROMPT_CHARACTERS } from "@/lib/types";
 
 describe("design examples", () => {
   it("covers every design group with complete, loadable prompts", () => {
@@ -22,7 +22,7 @@ describe("design examples", () => {
       expect(example.prompt).toMatch(/\nOUTPUT:\n/u);
       expect(example.prompt).toMatch(/\nSTRICT:\n/u);
       expect(example.prompt).not.toMatch(/\{\{\w+\}\}/u);
-      expect(buildPatternCandidates(example.prompt)).toHaveLength(candidateCount(false));
+      expect(buildPatternCandidates(example.prompt)).toHaveLength(candidateRange(false).max);
       expect(getDesignExample(example.id)).toBe(example);
     }
     expect(getDesignExample("unknown")).toBeUndefined();

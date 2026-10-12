@@ -1,10 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { listPatterns } from "../../lib/arc-core/core/index.js";
 import { PATTERN_EXAMPLES } from "../../lib/pattern-examples";
 
 const PROMPT = "Summarize this incident report for executives.";
 
-test("paste prompt → confirm → result renders with the rewrite and every catalog pattern", async ({ page }) => {
+test("paste prompt → confirm → result renders with the rewrite, the planned checks, and the plan's patterns", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Optimize a prompt" })).toBeVisible();
 
@@ -20,25 +19,32 @@ test("paste prompt → confirm → result renders with the rewrite and every cat
   const dialog = page.getByRole("dialog", { name: "Run optimization?" });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText("Nothing calls a model until you confirm.");
-  await expect(dialog).toContainText("The model first rewrites your prompt");
+  await expect(dialog).toContainText("The model first rewrites your prompt and plans objective checks");
   await expect(dialog).toContainText("Completions");
-  await expect(dialog.getByText("12", { exact: true })).toBeVisible();
-  await expect(dialog).toContainText("1 request, 11 Score questions");
+  await expect(dialog.getByText("5 to 13", { exact: true })).toBeVisible();
+  await expect(dialog).toContainText("1 request, 4 to 7 Score questions");
   await dialog.getByRole("button", { name: "Run" }).click();
 
+  // The mock rewrite plans a 60-word limit and a forbidden phrase that every mock output passes, so no revision runs:
+  // one rewrite call plus the baseline, the rewrite, and the plan's two patterns.
   await expect(page.getByRole("heading", { name: "Best candidate" })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("12 completions · Claude Sonnet 4.5")).toBeVisible();
+  await expect(page.getByText("5 completions · Claude Sonnet 4.5")).toBeVisible();
+  const checks = page.getByTestId("checks");
+  await expect(checks).toContainText("summarization task · suggested temperature 0.3");
+  await expect(checks).toContainText("at most 60 words");
+  await expect(checks).toContainText('never says "lorem ipsum"');
+  await expect(checks).toContainText("passed 3/3 checks");
+  await expect(checks).toContainText("The rewrite passed every check on its first run, so no revision was needed.");
 
-  await page.getByRole("button", { name: "See all candidates (11)" }).click();
+  await page.getByRole("button", { name: "See all candidates (4)" }).click();
   const rows = page.getByTestId("candidate-row");
-  await expect(rows).toHaveCount(11);
-  for (const pattern of listPatterns()) {
-    await expect(rows.filter({ hasText: new RegExp(`${pattern.name}-[0-9a-f]{8}`, "u") })).toHaveCount(1);
-  }
+  await expect(rows).toHaveCount(4);
+  await expect(rows.filter({ hasText: /c0-persona-[0-9a-f]{8}/u })).toHaveCount(1);
+  await expect(rows.filter({ hasText: /c1-critique-[0-9a-f]{8}/u })).toHaveCount(1);
   await expect(rows.first()).toContainText("selected");
-  const rewriteRow = rows.filter({ hasText: "Rewrite" });
+  const rewriteRow = rows.filter({ hasText: /rewrite-[0-9a-f]{8}/u });
   await expect(rewriteRow).toHaveCount(1);
-  await expect(rewriteRow).toContainText(/rewrite-[0-9a-f]{8}/u);
+  await expect(rewriteRow).toContainText("3/3 checks");
 
   // Selecting the rewrite shows the rewritten prompt and why it changed.
   if (!(await rewriteRow.textContent())?.includes("selected")) await rewriteRow.getByRole("button", { name: /^Use / }).click();

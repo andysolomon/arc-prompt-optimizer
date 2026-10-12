@@ -32,8 +32,16 @@ function loadSession(): PersistedSession | undefined {
       prompt: typeof parsed.prompt === "string" ? parsed.prompt : "",
       model: typeof parsed.model === "string" ? parsed.model : "",
       judge: typeof parsed.judge === "boolean" ? parsed.judge : true,
-      // Results saved before the rewrite existed have no rewrite report.
-      result: parsed.result ? { ...parsed.result, rewrite: parsed.result.rewrite ?? { status: "not_requested" } } : null,
+      // Results saved by earlier versions lack the rewrite, plan, revision, and loop reports.
+      result: parsed.result
+        ? {
+            ...parsed.result,
+            rewrite: parsed.result.rewrite ?? { status: "not_requested" },
+            plan: parsed.result.plan ?? { status: "default", reason: "This result predates planned checks.", suiteId: "prompt-optimize-preview", patterns: [] },
+            revisions: parsed.result.revisions ?? [],
+            loop: parsed.result.loop ?? { rounds: 0, stoppedBecause: "not_requested" },
+          }
+        : null,
       selectedId: typeof parsed.selectedId === "string" ? parsed.selectedId : null,
       edited: parsed.edited ?? {},
     };
@@ -155,7 +163,7 @@ function useSessionState() {
       setResult(next);
       setSelectedId(defaultSelectionId(next));
       setPhase("done");
-      if (next.rewrite.status === "failed") toast.warning(`The rewrite failed; ranking the remaining ${next.candidates.length} candidates.`);
+      if (next.rewrite.status === "failed") toast.warning(`The rewrite failed after ${next.rewrite.attempts} ${next.rewrite.attempts === 1 ? "attempt" : "attempts"}; ranking the baseline and ${next.candidates.length - 1} pattern variants instead.`);
       if (judgeForRun && next.judge.status === "failed") toast.warning("Jev judging failed; showing the deterministic ranking.");
     } catch (error) {
       if (controller.signal.aborted) return;

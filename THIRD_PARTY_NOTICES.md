@@ -3,8 +3,11 @@
 ## AI Engineering from Scratch
 
 The prompt rewrite protocol in `src/core/rewrite.ts` (`REWRITE_PROTOCOL`) is adapted from
-`phases/11-llm-engineering/01-prompt-engineering/outputs/prompt-prompt-optimizer.md` in
-[rohitg00/ai-engineering-from-scratch](https://github.com/rohitg00/ai-engineering-from-scratch).
+`phases/11-llm-engineering/01-prompt-engineering/outputs/prompt-prompt-optimizer.md`, and the task-type to
+pattern matrix in `src/core/plan.ts` (`PATTERN_MATRIX`) from
+`phases/11-llm-engineering/01-prompt-engineering/outputs/skill-prompt-patterns.md`, both in
+[rohitg00/ai-engineering-from-scratch](https://github.com/rohitg00/ai-engineering-from-scratch). The revise
+protocol (`REVISE_PROTOCOL`) implements the optimization loop exercise from the same lesson.
 
 ```
 MIT License
