@@ -8,7 +8,7 @@ import { PromptForm } from "@/components/optimize/prompt-form";
 import { ResultPanel } from "@/components/optimize/result-panel";
 import { REWRITE, useOptimizeSession } from "@/components/optimize/optimize-session-provider";
 import { getPatternExample } from "@/lib/pattern-examples";
-import { OPTIMIZE_PATTERNS } from "@/lib/pattern-candidates";
+import { MAX_PLAN_PATTERNS } from "@/lib/arc-core/core/index.js";
 
 export function OptimizeView() {
   const router = useRouter();
@@ -54,8 +54,9 @@ export function OptimizeView() {
       <div className="flex flex-col gap-2">
         <h1 className="m-0 text-3xl font-semibold leading-tight tracking-[-0.025em]">Optimize a prompt</h1>
         <p className="m-0 text-[15px] leading-relaxed text-muted-foreground text-pretty">
-          Paste a prompt. The model you pick rewrites it, the optimizer renders all {OPTIMIZE_PATTERNS.length} pattern variants, runs the baseline and every candidate
-          with that model, scores the outputs, and ranks them.
+          Paste a prompt. The model you pick rewrites it with a role, format, and constraints, and plans objective checks for the task. The optimizer
+          runs the baseline, the rewrite, and up to {MAX_PLAN_PATTERNS} pattern variants chosen for the task, scores every output against those checks,
+          revises the rewrite for any check it fails, and ranks the result.
         </p>
       </div>
 

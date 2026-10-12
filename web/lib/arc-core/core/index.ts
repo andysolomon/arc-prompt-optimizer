@@ -60,17 +60,55 @@ export {
   buildPreviewCandidates,
 } from "./preview.js";
 export {
+  DEFAULT_REWRITE_ATTEMPTS,
+  MAX_REVISE_CHECKS,
+  MAX_REVISE_OUTPUT_CHARACTERS,
+  MAX_REWRITE_ATTEMPTS,
   MAX_REWRITE_DRAFT_CHARACTERS,
   MAX_REWRITE_NOTES,
   MAX_REWRITE_NOTE_CHARACTERS,
+  MIN_RETRY_TIMEOUT_MS,
+  REVISE_FORMAT_REMINDER,
+  REVISE_PROTOCOL,
+  REWRITE_FORMAT_REMINDER,
   REWRITE_PATTERN,
   REWRITE_PROTOCOL,
+  buildRevisePrompt,
   buildRewritePrompt,
   parseRewriteOutput,
+  revisePrompt,
+  revisionCandidate,
+  revisionLabel,
   rewriteCandidate,
   rewritePrompt,
 } from "./rewrite.js";
-export type { RewriteOptions, RewriteOutcome, RewriteParse } from "./rewrite.js";
+export type {
+  BuildRewritePromptOptions,
+  FailedCheck,
+  ParseRewriteOptions,
+  ReviseInput,
+  RevisePromptInput,
+  RewriteOptions,
+  RewriteOutcome,
+  RewriteParse,
+} from "./rewrite.js";
+export {
+  FALLBACK_PATTERNS,
+  MAX_PLAN_PATTERNS,
+  MAX_PLAN_TERMS,
+  MAX_PLAN_TERM_CHARACTERS,
+  MAX_PLAN_VARIABLE_CHARACTERS,
+  MAX_PLAN_WORDS,
+  PATTERN_MATRIX,
+  PLAN_CASE_ID,
+  TASK_TYPES,
+  TASK_VARIABLE,
+  parseRewritePlan,
+  planHasCriteria,
+  planPatternSpecs,
+  planSuite,
+} from "./plan.js";
+export type { PlanCriteria, PlanPattern, RewritePlan, TaskType } from "./plan.js";
 export {
   DEFAULT_RANKING_OBJECTIVE,
   combineQuality,

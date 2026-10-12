@@ -4,7 +4,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { defaultSettingsMiddleware, extractReasoningMiddleware, generateText, wrapLanguageModel, type LanguageModel } from "ai";
 import { MAX_COMPLETION_OUTPUT_CHARACTERS } from "@/lib/arc-core/adapters/index.js";
-import { REWRITE_PROTOCOL } from "@/lib/arc-core/core/index.js";
+import { REVISE_PROTOCOL, REWRITE_PROTOCOL } from "@/lib/arc-core/core/index.js";
 import type { CompletionAdapter, CompletionRequest, CompletionResult } from "@/lib/arc-core/core/index.js";
 import type { ServerEnv } from "@/lib/env";
 import { OPENAI_COMPATIBLE_BASE_URLS, getModel, isReasoningProvider, type ModelDefinition } from "@/lib/models";
@@ -175,9 +175,11 @@ export class MockCompletionAdapter implements CompletionAdapter {
     this.#calls += 1;
     await new Promise((resolve) => setTimeout(resolve, 150));
     const firstLine = request.prompt.split("\n")[0] ?? "";
-    const text = request.prompt.startsWith(REWRITE_PROTOCOL)
+    const text = request.prompt.includes(REWRITE_PROTOCOL)
       ? mockRewriteReply(request.prompt)
-      : `Mock output ${this.#calls} for: ${firstLine.slice(0, 80)}`;
+      : request.prompt.includes(REVISE_PROTOCOL)
+        ? mockReviseReply(request.prompt)
+        : `Mock output ${this.#calls} for: ${firstLine.slice(0, 80)}`;
     return toCompletionResult({
       modelId: this.#modelId,
       text,
@@ -190,10 +192,19 @@ export class MockCompletionAdapter implements CompletionAdapter {
   }
 }
 
-/** Canned reply to the rewrite meta-prompt: wraps the fenced draft in a role, format, and constraints. */
+/** Canned reply to the rewrite meta-prompt: wraps the fenced draft in a role, format, and constraints, with a plan. */
 function mockRewriteReply(metaPrompt: string): string {
   const fenced = /(`{3,})\n([\s\S]*)\n\1$/u.exec(metaPrompt);
   const draft = fenced?.[2] ?? "";
+  const plan = {
+    task_type: "summarization",
+    temperature: 0.3,
+    criteria: { max_words: 60, forbidden_phrases: ["lorem ipsum"] },
+    patterns: [
+      { pattern: "persona", variables: { role: "a senior analyst", experience: "ten years of briefing executives", style: "plain and direct", priority: "accuracy over completeness" } },
+      { pattern: "critique" },
+    ],
+  };
   return [
     "<analysis>",
     "- No role or audience is stated.",
@@ -215,6 +226,31 @@ function mockRewriteReply(metaPrompt: string): string {
     "1. Added a specific role to set the register.",
     "2. Fixed the format and length so outputs are comparable.",
     "3. Added a negative and a conditional constraint.",
+    "</changes>",
+    "",
+    "<plan>",
+    JSON.stringify(plan),
+    "</plan>",
+  ].join("\n");
+}
+
+/** Canned reply to the revise meta-prompt: restates the fenced prompt with the limit up front. */
+function mockReviseReply(metaPrompt: string): string {
+  const fences = [...metaPrompt.matchAll(/(`{3,})\n([\s\S]*?)\n\1/gu)];
+  const prompt = fences[1]?.[2] ?? "";
+  return [
+    "<analysis>",
+    "- The limit was stated once, at the end, where it was easy to miss.",
+    "</analysis>",
+    "",
+    "<rewritten_prompt>",
+    "Answer in at most 5 bullet points of at most 20 words each.",
+    "",
+    prompt,
+    "</rewritten_prompt>",
+    "",
+    "<changes>",
+    "1. Moved the length limit to the first line.",
     "</changes>",
   ].join("\n");
 }
