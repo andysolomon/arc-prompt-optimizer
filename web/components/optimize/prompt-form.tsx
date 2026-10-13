@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { useRef, useState } from "react";
+import { ChevronDown, Eraser, ImagePlus } from "lucide-react";
+import { AttachmentStrip } from "@/components/optimize/attachment-strip";
+import type { LocalAttachment } from "@/lib/client/images";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SavePromptButton } from "@/components/library/prompt-editor-dialog";
@@ -10,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCharacterCount } from "@/lib/format";
-import { MAX_PROMPT_CHARACTERS, MAX_REWRITE_DETAIL_CHARACTERS, REFINE_DEFAULT_ROUNDS, REFINE_DEFAULT_VARIANTS, type ModelInfo } from "@/lib/types";
+import { IMAGE_ATTACHMENT_TYPES, MAX_ATTACHMENTS, MAX_PROMPT_CHARACTERS, MAX_REWRITE_DETAIL_CHARACTERS, REFINE_DEFAULT_ROUNDS, REFINE_DEFAULT_VARIANTS, type ModelInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export function PromptForm({
@@ -30,7 +32,14 @@ export function PromptForm({
   refine,
   refineAvailable,
   onRefineChange,
+  attachments,
+  imagesAccepted,
+  attachmentIssue,
+  onAddAttachments,
+  onRemoveAttachment,
   canRun,
+  canClear,
+  onClear,
   onRequestRun,
 }: {
   prompt: string;
@@ -50,11 +59,25 @@ export function PromptForm({
   /** The server flag is on; the switch is still disabled until the judge is on. */
   refineAvailable: boolean;
   onRefineChange: (value: boolean) => void;
+  attachments: readonly LocalAttachment[];
+  /** The selected model takes images. */
+  imagesAccepted: boolean;
+  /** Why the attached images block a run, when they do. */
+  attachmentIssue: string | undefined;
+  onAddAttachments: (files: readonly File[]) => void;
+  onRemoveAttachment: (id: string) => void;
   canRun: boolean;
+  /** Something to clear and no run in progress. */
+  canClear: boolean;
+  /** Clears the prompt, the rewrite details, and the previous result. */
+  onClear: () => void;
   onRequestRun: () => void;
 }) {
   const overLimit = prompt.length > MAX_PROMPT_CHARACTERS;
   const noModels = modelsLoaded && models.length === 0;
+  const fileInput = useRef<HTMLInputElement>(null);
+  const attachFull = attachments.length >= MAX_ATTACHMENTS;
+  const canAttach = imagesAccepted && !attachFull;
   return (
     <form
       className="flex flex-col rounded-[10px] border border-border bg-card shadow-[0_1px_2px_rgba(0,0,0,.04)]"
@@ -68,7 +91,13 @@ export function PromptForm({
           <label htmlFor="prompt" className="block text-sm font-medium">
             Prompt
           </label>
-          <SavePromptButton prompt={prompt} />
+          <div className="flex items-center gap-1.5">
+            <Button type="button" variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5 text-[13px]" disabled={!canClear} onClick={onClear} aria-label="New prompt">
+              <Eraser aria-hidden="true" className="size-3.5" />
+              New prompt
+            </Button>
+            <SavePromptButton prompt={prompt} />
+          </div>
         </div>
         <Textarea
           id="prompt"
@@ -85,6 +114,33 @@ export function PromptForm({
             {formatCharacterCount(prompt.length)}
           </span>
           <span id="prompt-limit">Limit {MAX_PROMPT_CHARACTERS.toLocaleString("en-US")} characters</span>
+        </div>
+        <div className="mt-3 flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={fileInput}
+              type="file"
+              accept={IMAGE_ATTACHMENT_TYPES.join(",")}
+              multiple
+              className="sr-only"
+              aria-label="Image files"
+              tabIndex={-1}
+              onChange={(event) => {
+                onAddAttachments(Array.from(event.target.files ?? []));
+                event.target.value = "";
+              }}
+            />
+            <AttachButton disabled={!canAttach} reason={!imagesAccepted ? `${models.find((entry) => entry.id === model)?.label ?? "This model"} does not accept images.` : attachFull ? `At most ${MAX_ATTACHMENTS} images.` : undefined} onClick={() => fileInput.current?.click()} />
+            <span className="text-[11px] text-muted-foreground">
+              {attachments.length === 0 ? `Up to ${MAX_ATTACHMENTS} images, sent with every completion. Large photos are resized in your browser.` : `${attachments.length} of ${MAX_ATTACHMENTS} images attached.`}
+            </span>
+          </div>
+          {attachments.length > 0 ? <AttachmentStrip attachments={attachments} onRemove={onRemoveAttachment} /> : null}
+          {attachmentIssue !== undefined ? (
+            <p role="alert" data-testid="attachment-issue" className="m-0 text-xs text-destructive">
+              {attachmentIssue}
+            </p>
+          ) : null}
         </div>
         <RewriteDetails context={context} onContextChange={onContextChange} useCase={useCase} onUseCaseChange={onUseCaseChange} />
       </div>
@@ -117,6 +173,28 @@ export function PromptForm({
         </p>
       ) : null}
     </form>
+  );
+}
+
+function AttachButton({ disabled, reason, onClick }: { disabled: boolean; reason: string | undefined; onClick: () => void }) {
+  const control = (
+    <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-[13px]" disabled={disabled} onClick={onClick} aria-describedby={reason ? "attach-reason" : undefined}>
+      <ImagePlus aria-hidden="true" className="size-3.5" />
+      Attach images
+    </Button>
+  );
+  if (reason === undefined) return control;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          {control}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent id="attach-reason" side="top" className="text-xs">
+        {reason}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

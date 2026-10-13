@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
+import { AttachmentStrip } from "@/components/optimize/attachment-strip";
+import type { LocalAttachment } from "@/lib/client/images";
 import { lineDiffSummary } from "@/lib/diff";
 import { candidateLabel, checkLabel, formatCharacterCount, formatCost, formatLatency, formatScore, formatTokens } from "@/lib/format";
 import { modelLabel } from "@/lib/models";
@@ -139,12 +141,15 @@ export function buildRows(result: OptimizeResult, edited: Readonly<Record<string
 
 export function ResultPanel({
   result,
+  attachments = [],
   selectedId,
   edited,
   onSelect,
   onSaveEdit,
 }: {
   result: OptimizeResult;
+  /** Images that were sent with every completion of this run. */
+  attachments?: readonly LocalAttachment[];
   selectedId: string | null;
   edited: Readonly<Record<string, string>>;
   onSelect: (id: string) => void;
@@ -183,6 +188,15 @@ export function ResultPanel({
           {result.completionsUsed} completions · {modelLabel(result.model)}
         </span>
       </div>
+
+      {attachments.length > 0 ? (
+        <div className="flex flex-col gap-2 rounded-[10px] border border-border bg-card px-4 py-3">
+          <span className="text-[13px] text-muted-foreground">
+            {attachments.length === 1 ? "This image was" : `These ${attachments.length} images were`} sent with every completion.
+          </span>
+          <AttachmentStrip attachments={attachments} />
+        </div>
+      ) : null}
 
       {result.rewrite.status === "failed" ? (
         <div role="alert" className="rounded-[10px] border border-destructive/40 bg-destructive/5 px-4 py-3 text-[13px] leading-relaxed">

@@ -95,6 +95,44 @@ export const refineSettingsSchema = z.object({
 
 export type RefineSettings = z.infer<typeof refineSettingsSchema>;
 
+/** Image types a prompt can carry; every vision provider in `lib/models.ts` accepts all four. */
+export const IMAGE_ATTACHMENT_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
+export type ImageAttachmentType = (typeof IMAGE_ATTACHMENT_TYPES)[number];
+export const MAX_ATTACHMENTS = 3;
+/** Per image after the browser downscales it; the request body must stay under Vercel's 4.5 MB limit as base64. */
+export const MAX_ATTACHMENT_BYTES = 1_500_000;
+export const MAX_ATTACHMENTS_TOTAL_BYTES = 3_000_000;
+export const MAX_ATTACHMENT_NAME_CHARACTERS = 200;
+
+/** Decoded size of a base64 string without decoding it. */
+export function base64Bytes(data: string): number {
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  return Math.floor((data.length * 3) / 4) - padding;
+}
+
+export const imageAttachmentSchema = z.object({
+  name: z.string({ error: "Attachment name must be a string." }).max(MAX_ATTACHMENT_NAME_CHARACTERS, { error: `Attachment name must be at most ${MAX_ATTACHMENT_NAME_CHARACTERS} characters.` }),
+  type: z.enum(IMAGE_ATTACHMENT_TYPES, { error: "Attachments must be JPEG, PNG, WebP, or GIF images." }),
+  /** Base64 without a data-URL prefix. */
+  data: z
+    .string({ error: "Attachment data must be a string." })
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/u, { error: "Attachment data must be base64." })
+    .refine((value) => base64Bytes(value) <= MAX_ATTACHMENT_BYTES, { error: `Each image must be at most ${(MAX_ATTACHMENT_BYTES / 1_000_000).toFixed(1)} MB.` }),
+});
+
+export type ImageAttachment = z.infer<typeof imageAttachmentSchema>;
+
+/** What a run record keeps about its attachments: never the image data. */
+export interface AttachmentInfo {
+  readonly name: string;
+  readonly type: ImageAttachmentType;
+  readonly bytes: number;
+}
+
+export function attachmentInfo(attachments: readonly ImageAttachment[] | undefined): AttachmentInfo[] {
+  return (attachments ?? []).map((attachment) => ({ name: attachment.name, type: attachment.type, bytes: base64Bytes(attachment.data) }));
+}
+
 export const optimizeRequestSchema = z.object({
   prompt: z
     .string({ error: "Prompt must be a string." })
@@ -112,6 +150,14 @@ export const optimizeRequestSchema = z.object({
   useCase: rewriteDetail("useCase"),
   /** Iterate on the top-ranked candidate with Jev feedback. Requires `judge: true` and the server flag. */
   refine: refineSettingsSchema.optional(),
+  /** Images attached to every completion in the run. Only accepted for models that take images. */
+  attachments: z
+    .array(imageAttachmentSchema)
+    .max(MAX_ATTACHMENTS, { error: `At most ${MAX_ATTACHMENTS} images can be attached.` })
+    .refine((entries) => entries.reduce((sum, entry) => sum + base64Bytes(entry.data), 0) <= MAX_ATTACHMENTS_TOTAL_BYTES, {
+      error: `Attached images must total at most ${(MAX_ATTACHMENTS_TOTAL_BYTES / 1_000_000).toFixed(0)} MB.`,
+    })
+    .optional(),
 });
 
 export type OptimizeRequest = z.infer<typeof optimizeRequestSchema>;
@@ -421,6 +467,8 @@ export const modelInfoSchema = z.object({
   id: z.enum(MODEL_IDS),
   label: z.string(),
   provider: z.enum(["anthropic", "openai", "google", "minimax", "opencode-go"]),
+  /** The model accepts image attachments. */
+  vision: z.boolean().default(false),
 });
 
 export type ModelInfo = z.infer<typeof modelInfoSchema>;

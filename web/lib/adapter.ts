@@ -2,14 +2,14 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { defaultSettingsMiddleware, extractReasoningMiddleware, generateText, wrapLanguageModel, type LanguageModel } from "ai";
+import { defaultSettingsMiddleware, extractReasoningMiddleware, generateText, wrapLanguageModel, type LanguageModel, type ModelMessage } from "ai";
 import { MAX_COMPLETION_OUTPUT_CHARACTERS } from "@/lib/arc-core/adapters/index.js";
 import { REFINE_PROTOCOL, REVISE_PROTOCOL, REWRITE_PROTOCOL } from "@/lib/arc-core/core/index.js";
 import type { CompletionAdapter, CompletionRequest, CompletionResult } from "@/lib/arc-core/core/index.js";
 import type { ServerEnv } from "@/lib/env";
 import { OPENAI_COMPATIBLE_BASE_URLS, getModel, isReasoningProvider, type ModelDefinition } from "@/lib/models";
 import { estimateCostUsd } from "@/lib/pricing";
-import type { ModelId } from "@/lib/types";
+import type { ImageAttachment, ModelId } from "@/lib/types";
 
 /** Rough character-to-token ratio used only to cap generation so outputs fit the core's character limit. */
 export const CHARACTERS_PER_TOKEN_ESTIMATE = 4;
@@ -73,7 +73,10 @@ function openAiCompatibleModel(provider: "minimax" | "opencode-go", providerMode
 
 export type GenerateTextFn = (args: {
   model: LanguageModel;
-  prompt: string;
+  /** The prompt as one text message, used when the run has no attachments. */
+  prompt?: string;
+  /** The prompt text followed by the run's images in one user message. */
+  messages?: ModelMessage[];
   maxOutputTokens: number;
   /** Forwarded as requested; providers that reject it for a model (OpenAI reasoning models) drop it with a warning. */
   temperature?: number;
@@ -125,18 +128,34 @@ function asCount(value: number | undefined): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
-/** `CompletionAdapter` backed by the Vercel AI SDK. Ignores the offline `fixtureId` hint. */
+/** The prompt text and the run's images as one user message, in the AI SDK's message shape. */
+export function promptWithImages(prompt: string, attachments: readonly ImageAttachment[]): ModelMessage[] {
+  return [
+    {
+      role: "user",
+      content: [{ type: "text", text: prompt }, ...attachments.map((attachment) => ({ type: "image" as const, image: attachment.data, mediaType: attachment.type }))],
+    },
+  ];
+}
+
+/**
+ * `CompletionAdapter` backed by the Vercel AI SDK. Ignores the offline `fixtureId` hint. The run's image
+ * attachments ride along with every completion (the rewrite, each candidate, revisions, and refinements), so the
+ * core library only ever sees prompt text.
+ */
 export class AiSdkCompletionAdapter implements CompletionAdapter {
   readonly #modelId: ModelId;
   readonly #model: LanguageModel;
   readonly #generate: GenerateTextFn;
   readonly #reasoning: boolean;
+  readonly #attachments: readonly ImageAttachment[];
 
-  constructor(modelId: ModelId, env: ServerEnv, generate: GenerateTextFn = generateText as unknown as GenerateTextFn) {
+  constructor(modelId: ModelId, env: ServerEnv, generate: GenerateTextFn = generateText as unknown as GenerateTextFn, attachments: readonly ImageAttachment[] = []) {
     this.#modelId = modelId;
     this.#reasoning = isReasoningProvider(getModel(modelId).provider);
     this.#model = languageModelFor(modelId, env);
     this.#generate = generate;
+    this.#attachments = attachments;
   }
 
   async complete(request: CompletionRequest, signal?: AbortSignal): Promise<CompletionResult> {
@@ -144,7 +163,7 @@ export class AiSdkCompletionAdapter implements CompletionAdapter {
     const started = performance.now();
     const generated = await this.#generate({
       model: this.#model,
-      prompt: request.prompt,
+      ...(this.#attachments.length === 0 ? { prompt: request.prompt } : { messages: promptWithImages(request.prompt, this.#attachments) }),
       maxOutputTokens: outputCharacterLimitToMaxTokens(outputLimit, this.#reasoning),
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
       ...(signal === undefined ? {} : { abortSignal: signal }),

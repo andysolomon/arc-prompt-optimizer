@@ -34,6 +34,9 @@ export function ProgressPanel({
         </Button>
       </div>
       <Progress value={percent} aria-label="Run progress" className="h-1 bg-muted" />
+      <p className="m-0 text-xs text-muted-foreground">
+        The run continues on the server if you switch apps, lose the connection, or reload. Come back to this page within 10 minutes to pick it up.
+      </p>
       <ol className="m-0 flex list-none flex-col gap-2 p-0 text-sm">
         {state.steps.map((step) => {
           const done = state.done.includes(step.key);

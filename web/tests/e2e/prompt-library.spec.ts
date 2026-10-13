@@ -75,7 +75,8 @@ test("save the edited selected candidate and report storage failures without cla
   await page.getByRole("button", { name: "Optimize", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Run", exact: true }).click();
   const result = page.getByRole("region", { name: "Result" });
-  await expect(result).toBeVisible();
+  // The run executes on the server and is polled; in dev the first request also compiles the route.
+  await expect(result).toBeVisible({ timeout: 30_000 });
   await result.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByLabel("Edit candidate prompt").fill("My edited winning candidate.");
   await result.getByRole("button", { name: "Save", exact: true }).click();
