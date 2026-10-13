@@ -4,9 +4,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { toast } from "sonner";
 import { RunCancelledError, RunUnavailableError, discardRun, followRun, startRun as startServerRun } from "@/lib/client/runs";
 import { defaultSelectionId } from "@/lib/client/selection";
+import { prepareImage, type LocalAttachment } from "@/lib/client/images";
 import { advanceSteps, planSteps, type StepState } from "@/lib/client/steps";
-import { modelLabel } from "@/lib/models";
+import { modelAcceptsImages, modelLabel } from "@/lib/models";
 import {
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENTS_TOTAL_BYTES,
   MAX_PROMPT_CHARACTERS,
   MAX_REWRITE_DETAIL_CHARACTERS,
   REFINE_DEFAULT_ROUNDS,
@@ -37,6 +40,12 @@ interface PersistedSession {
   result: OptimizeResult | null;
   selectedId: string | null;
   edited: Record<string, string>;
+  attachments: LocalAttachment[];
+}
+
+function isLocalAttachment(value: unknown): value is LocalAttachment {
+  const entry = value as Partial<LocalAttachment> | null;
+  return typeof entry === "object" && entry !== null && typeof entry.id === "string" && typeof entry.name === "string" && typeof entry.type === "string" && typeof entry.data === "string" && typeof entry.bytes === "number";
 }
 
 interface ActiveRun {
@@ -100,6 +109,7 @@ function loadSession(): PersistedSession | undefined {
         : null,
       selectedId: typeof parsed.selectedId === "string" ? parsed.selectedId : null,
       edited: parsed.edited ?? {},
+      attachments: Array.isArray(parsed.attachments) ? parsed.attachments.filter(isLocalAttachment) : [],
     };
   } catch {
     return undefined;
@@ -123,6 +133,7 @@ function useSessionState() {
   const [result, setResult] = useState<OptimizeResult | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [edited, setEdited] = useState<Record<string, string>>({});
+  const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const controllerRef = useRef<AbortController | null>(null);
   const [pendingResume, setPendingResume] = useState<ActiveRun | null>(null);
 
@@ -142,6 +153,7 @@ function useSessionState() {
       setResult(session.result);
       setSelectedId(session.selectedId);
       setEdited(session.edited);
+      setAttachments(session.attachments);
       if (session.result && !active) setPhase("done");
     }
     setHydrated(true);
@@ -150,12 +162,17 @@ function useSessionState() {
   useEffect(() => {
     if (!hydrated) return;
     try {
-      const session: PersistedSession = { prompt, context, useCase, model, judge, refine, result, selectedId, edited };
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      const session: PersistedSession = { prompt, context, useCase, model, judge, refine, result, selectedId, edited, attachments };
+      try {
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      } catch {
+        // Images can exceed the storage quota; keep everything else rather than nothing.
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ ...session, attachments: [] }));
+      }
     } catch {
       /* storage unavailable or full */
     }
-  }, [hydrated, prompt, context, useCase, model, judge, refine, result, selectedId, edited]);
+  }, [hydrated, prompt, context, useCase, model, judge, refine, result, selectedId, edited, attachments]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -188,7 +205,11 @@ function useSessionState() {
 
   const trimmedEmpty = prompt.trim().length === 0;
   const detailsWithinLimit = context.length <= MAX_REWRITE_DETAIL_CHARACTERS && useCase.length <= MAX_REWRITE_DETAIL_CHARACTERS;
-  const canRun = !trimmedEmpty && prompt.length <= MAX_PROMPT_CHARACTERS && detailsWithinLimit && phase !== "running" && model !== "";
+  const imagesAccepted = modelAcceptsImages(model);
+  /** Why the attached images block a run, or undefined when they do not. */
+  const attachmentIssue =
+    attachments.length === 0 ? undefined : !imagesAccepted ? `${modelLabel(model)} does not accept images. Pick a vision model or remove the images.` : undefined;
+  const canRun = !trimmedEmpty && prompt.length <= MAX_PROMPT_CHARACTERS && detailsWithinLimit && phase !== "running" && model !== "" && attachmentIssue === undefined;
   const effectiveJudge = judge && judgeAvailable;
   // The refine loop iterates on Jev scores, so it is only offered alongside the judge.
   const effectiveRefine = refine && refineAvailable && effectiveJudge;
@@ -259,12 +280,48 @@ function useSessionState() {
     setPhase(result ? "done" : "idle");
   }, [result]);
 
+  const addAttachments = useCallback(
+    async (files: readonly File[]) => {
+      if (files.length === 0) return;
+      const prepared: LocalAttachment[] = [];
+      for (const file of files) {
+        try {
+          prepared.push(await prepareImage(file));
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : `Could not attach ${file.name}.`);
+        }
+      }
+      if (prepared.length === 0) return;
+      setAttachments((current) => {
+        const next = [...current];
+        for (const attachment of prepared) {
+          if (next.length >= MAX_ATTACHMENTS) {
+            toast.warning(`At most ${MAX_ATTACHMENTS} images can be attached.`);
+            break;
+          }
+          if (next.reduce((sum, entry) => sum + entry.bytes, 0) + attachment.bytes > MAX_ATTACHMENTS_TOTAL_BYTES) {
+            toast.warning(`Attached images must total at most ${(MAX_ATTACHMENTS_TOTAL_BYTES / 1_000_000).toFixed(0)} MB; ${attachment.name} was not added.`);
+            continue;
+          }
+          next.push(attachment);
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((current) => current.filter((entry) => entry.id !== id));
+  }, []);
+
   const loadExample = useCallback((text: string) => {
     if (controllerRef.current !== null) {
       toast.warning("Finish or cancel the current optimization before loading an example.");
       return;
     }
     setPrompt(text);
+    setAttachments([]);
     setResult(null);
     setSelectedId(null);
     setEdited({});
@@ -280,6 +337,7 @@ function useSessionState() {
     setPrompt("");
     setContext("");
     setUseCase("");
+    setAttachments([]);
     setResult(null);
     setSelectedId(null);
     setEdited({});
@@ -305,6 +363,7 @@ function useSessionState() {
         ...(context.trim() === "" ? {} : { context }),
         ...(useCase.trim() === "" ? {} : { useCase }),
         ...(refineForRun === undefined ? {} : { refine: refineForRun }),
+        ...(attachments.length === 0 ? {} : { attachments: attachments.map(({ name, type, data }) => ({ name, type, data })) }),
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Optimization failed.");
@@ -314,7 +373,7 @@ function useSessionState() {
     const run: ActiveRun = { id, startedAt: Date.now(), model, judge: judgeForRun, refineRounds: refineForRun?.rounds ?? 0 };
     saveActiveRun(run);
     await follow(run);
-  }, [context, effectiveJudge, follow, model, prompt, refineSettings, useCase]);
+  }, [attachments, context, effectiveJudge, follow, model, prompt, refineSettings, useCase]);
 
   return {
     hydrated,
@@ -343,6 +402,11 @@ function useSessionState() {
     setSelectedId,
     edited,
     setEdited,
+    attachments,
+    addAttachments,
+    removeAttachment,
+    imagesAccepted,
+    attachmentIssue,
     canRun,
     effectiveJudge,
     refineSettings,

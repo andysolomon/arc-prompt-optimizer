@@ -3,6 +3,7 @@ import { MODEL_IDS, type ModelId, type ModelInfo } from "@/lib/types";
 export type Provider = ModelInfo["provider"];
 
 export interface ModelDefinition extends ModelInfo {
+  readonly vision: boolean;
   /** Model id passed to the provider SDK. */
   readonly providerModelId: string;
   /** Environment variable that must be present for the provider to be offered. */
@@ -27,6 +28,11 @@ export const OPENAI_COMPATIBLE_BASE_URLS: Readonly<Record<"minimax" | "opencode-
   "opencode-go": "https://opencode.ai/zen/go/v1",
 });
 
+/**
+ * `vision` marks the models that take image attachments. The first-party Anthropic, OpenAI, and Google models do.
+ * The MiniMax and OpenCode Go gateways are left off: their chat endpoints accept image parts syntactically, but
+ * whether each model reads them is not verified here, so the UI does not offer attachments on them.
+ */
 export const MODELS: readonly ModelDefinition[] = Object.freeze([
   {
     id: "anthropic/claude-sonnet-4-5",
@@ -34,6 +40,7 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "anthropic",
     providerModelId: "claude-sonnet-4-5",
     envVar: "ANTHROPIC_API_KEY",
+    vision: true,
   },
   {
     id: "anthropic/claude-haiku-4-5",
@@ -41,6 +48,7 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "anthropic",
     providerModelId: "claude-haiku-4-5",
     envVar: "ANTHROPIC_API_KEY",
+    vision: true,
   },
   {
     id: "openai/gpt-5-mini",
@@ -48,6 +56,7 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "openai",
     providerModelId: "gpt-5-mini",
     envVar: "OPENAI_API_KEY",
+    vision: true,
   },
   {
     id: "google/gemini-2.5-flash",
@@ -55,6 +64,7 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "google",
     providerModelId: "gemini-2.5-flash",
     envVar: "GOOGLE_GENERATIVE_AI_API_KEY",
+    vision: true,
   },
   {
     id: "minimax/MiniMax-M3",
@@ -62,6 +72,7 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "minimax",
     providerModelId: "MiniMax-M3",
     envVar: "MINIMAX_API_KEY",
+    vision: false,
   },
   {
     id: "minimax/MiniMax-M2.7",
@@ -69,6 +80,7 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "minimax",
     providerModelId: "MiniMax-M2.7",
     envVar: "MINIMAX_API_KEY",
+    vision: false,
   },
   {
     id: "opencode-go/deepseek-v4-pro",
@@ -76,6 +88,7 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "opencode-go",
     providerModelId: "deepseek-v4-pro",
     envVar: "OPENCODE_API_KEY",
+    vision: false,
   },
   {
     id: "opencode-go/glm-5.3",
@@ -83,6 +96,7 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "opencode-go",
     providerModelId: "glm-5.3",
     envVar: "OPENCODE_API_KEY",
+    vision: false,
   },
   {
     id: "opencode-go/kimi-k2.6",
@@ -90,6 +104,7 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "opencode-go",
     providerModelId: "kimi-k2.6",
     envVar: "OPENCODE_API_KEY",
+    vision: false,
   },
   {
     id: "opencode-go/qwen3.7-plus",
@@ -97,6 +112,7 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "opencode-go",
     providerModelId: "qwen3.7-plus",
     envVar: "OPENCODE_API_KEY",
+    vision: false,
   },
 ]);
 
@@ -117,6 +133,10 @@ export function modelLabel(id: string): string {
 /** Models whose provider key is present. Pure so the filter is unit-testable without `process.env`. */
 export function availableModels(env: Readonly<Record<string, string | undefined>>): readonly ModelInfo[] {
   return MODELS.filter((model) => (env[model.envVar] ?? "").trim().length > 0).map(
-    ({ id, label, provider }) => ({ id, label, provider }),
+    ({ id, label, provider, vision }) => ({ id, label, provider, vision }),
   );
+}
+
+export function modelAcceptsImages(id: string): boolean {
+  return MODELS.find((entry) => entry.id === id)?.vision ?? false;
 }

@@ -21,6 +21,7 @@ export function ConfirmDialog({
   judge,
   rewrite,
   refine,
+  attachments = 0,
   onCancel,
   onRun,
 }: {
@@ -29,6 +30,8 @@ export function ConfirmDialog({
   judge: boolean;
   rewrite: boolean;
   refine?: RefineSettings | undefined;
+  /** Images sent with every completion. */
+  attachments?: number;
   onCancel: () => void;
   onRun: () => void;
 }) {
@@ -42,6 +45,14 @@ export function ConfirmDialog({
         <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
           <dt className="text-muted-foreground">Model</dt>
           <dd className="m-0">{modelLabel}</dd>
+          {attachments > 0 ? (
+            <>
+              <dt className="text-muted-foreground">Images</dt>
+              <dd className="m-0">
+                {attachments} {attachments === 1 ? "image" : "images"}, sent with every completion; the Jev judge sees text only
+              </dd>
+            </>
+          ) : null}
           {rewrite ? (
             <>
               <dt className="text-muted-foreground">Rewrite</dt>

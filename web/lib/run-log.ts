@@ -15,6 +15,8 @@ export interface RunMeta {
   readonly judge: boolean;
   readonly rewrite: boolean;
   readonly refine?: RefineSettings;
+  /** Images attached to every completion. */
+  readonly attachments: number;
 }
 
 export type RunErrorKind = "timeout" | "cancelled" | "rate_limit" | "provider" | "unknown";
@@ -98,6 +100,7 @@ export class RunObserver {
       judge: this.#meta.judge,
       rewrite: this.#meta.rewrite,
       ...(this.#meta.refine === undefined ? {} : { refine: this.#meta.refine }),
+      attachments: this.#meta.attachments,
       elapsedMs: Math.round(this.#now() - this.#started),
       ...fields,
     });

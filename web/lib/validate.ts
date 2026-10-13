@@ -1,4 +1,26 @@
-import { optimizeRequestSchema, type OptimizeRequest } from "@/lib/types";
+import { modelAcceptsImages } from "@/lib/models";
+import { optimizeRequestSchema, type ImageAttachment, type OptimizeRequest } from "@/lib/types";
+
+/** The bytes at the start of each accepted image type, so a mislabelled file is rejected before it reaches a provider. */
+function matchesSignature(attachment: ImageAttachment): boolean {
+  let head: string;
+  try {
+    head = atob(attachment.data.slice(0, 24));
+  } catch {
+    return false;
+  }
+  const byte = (index: number) => head.charCodeAt(index);
+  switch (attachment.type) {
+    case "image/jpeg":
+      return byte(0) === 0xff && byte(1) === 0xd8 && byte(2) === 0xff;
+    case "image/png":
+      return byte(0) === 0x89 && head.slice(1, 4) === "PNG";
+    case "image/gif":
+      return head.slice(0, 4) === "GIF8";
+    case "image/webp":
+      return head.slice(0, 4) === "RIFF" && head.slice(8, 12) === "WEBP";
+  }
+}
 
 export type ValidationOutcome =
   | { ok: true; value: OptimizeRequest }
@@ -25,5 +47,13 @@ export function validateOptimizeBody(body: unknown, allowedModels: readonly stri
       message: `Model '${parsed.data.model}' is not available: its provider key is not configured.`,
     };
   }
-  return { ok: true, value: parsed.data };
+  const attachments = parsed.data.attachments ?? [];
+  if (attachments.length > 0 && !modelAcceptsImages(parsed.data.model)) {
+    return { ok: false, status: 400, message: `Model '${parsed.data.model}' does not accept image attachments.` };
+  }
+  const mislabelled = attachments.find((attachment) => !matchesSignature(attachment));
+  if (mislabelled !== undefined) {
+    return { ok: false, status: 400, message: `Attachment '${mislabelled.name}' is not a ${mislabelled.type.slice("image/".length).toUpperCase()} image.` };
+  }
+  return { ok: true, value: attachments.length === 0 ? { ...parsed.data, attachments: undefined } : parsed.data };
 }

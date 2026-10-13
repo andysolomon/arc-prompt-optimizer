@@ -199,7 +199,7 @@ export interface RunOptions {
 function selectAdapter(request: OptimizeRequest, options: RunOptions): CompletionAdapter {
   if (options.adapter !== undefined) return options.adapter;
   if (mockProvidersEnabled(options.env)) return new MockCompletionAdapter(request.model);
-  return new AiSdkCompletionAdapter(request.model, options.env);
+  return new AiSdkCompletionAdapter(request.model, options.env, undefined, request.attachments ?? []);
 }
 
 function mockJudge(entries: readonly JevEntry[]): JudgeReport {

@@ -2,7 +2,7 @@ import "server-only";
 import { Redis } from "@upstash/redis";
 import type { ServerEnv } from "@/lib/env";
 import type { RunErrorInfo } from "@/lib/run-log";
-import type { ModelId, OptimizeResult, RefineSettings, StepEvent } from "@/lib/types";
+import type { AttachmentInfo, ModelId, OptimizeResult, RefineSettings, StepEvent } from "@/lib/types";
 
 export type RunStatus = "running" | "done" | "failed" | "cancelled";
 
@@ -17,6 +17,8 @@ export interface RunRecord {
   readonly judge: boolean;
   readonly rewrite: boolean;
   readonly refine?: RefineSettings;
+  /** Names, types, and sizes of the attached images; the image data itself is never stored. */
+  readonly attachments?: readonly AttachmentInfo[];
   /** Epoch milliseconds. */
   readonly createdAt: number;
   readonly updatedAt: number;

@@ -3,7 +3,7 @@ import type { ServerEnv } from "@/lib/env";
 import { runOptimization, type RunOptions } from "@/lib/optimize-run";
 import { RunObserver, describeError, type RunLogSink, type RunMeta, type RunTransport } from "@/lib/run-log";
 import type { RunRecord, RunStore } from "@/lib/run-store";
-import type { OptimizeRequest, OptimizeResult, StepEvent } from "@/lib/types";
+import { attachmentInfo, type OptimizeRequest, type OptimizeResult, type StepEvent } from "@/lib/types";
 
 export function runMeta(runId: string, transport: RunTransport, input: OptimizeRequest): RunMeta {
   return {
@@ -13,6 +13,7 @@ export function runMeta(runId: string, transport: RunTransport, input: OptimizeR
     judge: input.judge,
     rewrite: input.rewrite,
     ...(input.refine === undefined ? {} : { refine: input.refine }),
+    attachments: input.attachments?.length ?? 0,
   };
 }
 
@@ -24,6 +25,7 @@ export function newRunRecord(id: string, input: OptimizeRequest, now = Date.now(
     judge: input.judge,
     rewrite: input.rewrite,
     ...(input.refine === undefined ? {} : { refine: input.refine }),
+    ...(input.attachments === undefined || input.attachments.length === 0 ? {} : { attachments: attachmentInfo(input.attachments) }),
     createdAt: now,
     updatedAt: now,
     steps: [],

@@ -40,6 +40,11 @@ export function OptimizeView() {
     setSelectedId,
     edited,
     setEdited,
+    attachments,
+    addAttachments,
+    removeAttachment,
+    imagesAccepted,
+    attachmentIssue,
     canRun,
     effectiveJudge,
     refineSettings,
@@ -92,8 +97,13 @@ export function OptimizeView() {
         refine={refine}
         refineAvailable={refineAvailable}
         onRefineChange={setRefine}
+        attachments={attachments}
+        imagesAccepted={imagesAccepted}
+        attachmentIssue={attachmentIssue}
+        onAddAttachments={(files) => void addAttachments(files)}
+        onRemoveAttachment={removeAttachment}
         canRun={canRun}
-        canClear={phase !== "running" && (prompt !== "" || context !== "" || useCase !== "" || result !== null)}
+        canClear={phase !== "running" && (prompt !== "" || context !== "" || useCase !== "" || result !== null || attachments.length > 0)}
         onClear={startNewPrompt}
         onRequestRun={() => setPhase("confirm")}
       />
@@ -105,6 +115,7 @@ export function OptimizeView() {
       {phase === "done" && result ? (
         <ResultPanel
           result={result}
+          attachments={attachments}
           selectedId={selectedId}
           edited={edited}
           onSelect={setSelectedId}
@@ -118,6 +129,7 @@ export function OptimizeView() {
         judge={effectiveJudge}
         rewrite={REWRITE}
         refine={refineSettings}
+        attachments={attachments.length}
         onCancel={() => setPhase(result ? "done" : "idle")}
         onRun={() => void startRun()}
       />

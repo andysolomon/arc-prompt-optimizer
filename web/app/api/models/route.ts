@@ -10,7 +10,7 @@ export async function GET(): Promise<Response> {
   const env = readServerEnv();
   const mock = mockProvidersEnabled(env);
   const body: ModelsResponse = {
-    models: mock ? MODELS.map(({ id, label, provider }) => ({ id, label, provider })) : [...availableModels(process.env)],
+    models: mock ? MODELS.map(({ id, label, provider, vision }) => ({ id, label, provider, vision })) : [...availableModels(process.env)],
     judgeAvailable: mock || env.TYPESAFE_API_KEY !== undefined,
     refineAvailable: refineEnabled(env),
   };

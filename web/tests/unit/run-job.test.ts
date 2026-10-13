@@ -6,7 +6,7 @@ import { describeError, type RunLogLevel } from "@/lib/run-log";
 import { MemoryRunStore } from "@/lib/run-store";
 import type { OptimizeRequest } from "@/lib/types";
 
-const env = readServerEnv({ ARC_MOCK_PROVIDERS: "1" });
+const env = readServerEnv({ ARC_MOCK_PROVIDERS: "1" } as unknown as NodeJS.ProcessEnv);
 const input: OptimizeRequest = { prompt: "Summarize this incident report for executives.", model: "anthropic/claude-sonnet-4-5", judge: false, rewrite: true };
 
 function collector() {
