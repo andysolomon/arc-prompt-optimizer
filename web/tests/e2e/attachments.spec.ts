@@ -20,9 +20,11 @@ test("attach an image, see it on the result, and send it with the run", async ({
   await expect(attachment).toContainText("2×2");
   await expect(page.getByText("1 of 3 images attached.")).toBeVisible();
 
-  // A file that is not an image is reported and not attached.
+  // A file that is not an image, or that cannot be decoded, is reported and not attached.
   await page.getByLabel("Image files").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
   await expect(page.getByText("notes.txt is not a JPEG, PNG, WebP, or GIF image.")).toBeVisible();
+  await page.getByLabel("Image files").setInputFiles({ name: "broken.jpg", mimeType: "image/jpeg", buffer: Buffer.from("not really a jpeg") });
+  await expect(page.getByText("broken.jpg is not a JPEG, PNG, WebP, or GIF image.")).toBeVisible();
   await expect(attachment).toHaveCount(1);
 
   await page.getByRole("button", { name: "Optimize", exact: true }).click();

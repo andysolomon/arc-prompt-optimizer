@@ -45,7 +45,9 @@ export default defineConfig({
     ...(process.env.PLAYWRIGHT_CHROMIUM_PATH ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } } : {}),
   },
   projects: [
-    { name: "chromium", testIgnore: /clerk\.spec\.ts/u, use: { ...devices["Desktop Chrome"] } },
+    { name: "chromium", testIgnore: /(clerk|mobile)\.spec\.ts/u, use: { ...devices["Desktop Chrome"] } },
+    // A phone-sized touch viewport in Chromium (WebKit is not installed here): covers the touch-only styles and the native picker control.
+    { name: "mobile", testMatch: /mobile\.spec\.ts/u, use: { ...devices["iPhone 13"], browserName: "chromium" } },
     { name: "clerk", testMatch: /clerk\.spec\.ts/u, use: { ...devices["Desktop Chrome"], baseURL: CLERK_BASE_URL } },
   ],
   webServer: [

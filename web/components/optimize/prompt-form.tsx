@@ -1,10 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, Eraser, ImagePlus } from "lucide-react";
 import { AttachmentStrip } from "@/components/optimize/attachment-strip";
 import type { LocalAttachment } from "@/lib/client/images";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SavePromptButton } from "@/components/library/prompt-editor-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCharacterCount } from "@/lib/format";
-import { IMAGE_ATTACHMENT_TYPES, MAX_ATTACHMENTS, MAX_PROMPT_CHARACTERS, MAX_REWRITE_DETAIL_CHARACTERS, REFINE_DEFAULT_ROUNDS, REFINE_DEFAULT_VARIANTS, type ModelInfo } from "@/lib/types";
+import { MAX_ATTACHMENTS, MAX_PROMPT_CHARACTERS, MAX_REWRITE_DETAIL_CHARACTERS, REFINE_DEFAULT_ROUNDS, REFINE_DEFAULT_VARIANTS, type ModelInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export function PromptForm({
@@ -75,7 +75,6 @@ export function PromptForm({
 }) {
   const overLimit = prompt.length > MAX_PROMPT_CHARACTERS;
   const noModels = modelsLoaded && models.length === 0;
-  const fileInput = useRef<HTMLInputElement>(null);
   const attachFull = attachments.length >= MAX_ATTACHMENTS;
   const canAttach = imagesAccepted && !attachFull;
   return (
@@ -117,20 +116,11 @@ export function PromptForm({
         </div>
         <div className="mt-3 flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <input
-              ref={fileInput}
-              type="file"
-              accept={IMAGE_ATTACHMENT_TYPES.join(",")}
-              multiple
-              className="sr-only"
-              aria-label="Image files"
-              tabIndex={-1}
-              onChange={(event) => {
-                onAddAttachments(Array.from(event.target.files ?? []));
-                event.target.value = "";
-              }}
+            <AttachControl
+              disabled={!canAttach}
+              reason={!imagesAccepted ? `${models.find((entry) => entry.id === model)?.label ?? "This model"} does not accept images.` : attachFull ? `At most ${MAX_ATTACHMENTS} images.` : undefined}
+              onFiles={onAddAttachments}
             />
-            <AttachButton disabled={!canAttach} reason={!imagesAccepted ? `${models.find((entry) => entry.id === model)?.label ?? "This model"} does not accept images.` : attachFull ? `At most ${MAX_ATTACHMENTS} images.` : undefined} onClick={() => fileInput.current?.click()} />
             <span className="text-[11px] text-muted-foreground">
               {attachments.length === 0 ? `Up to ${MAX_ATTACHMENTS} images, sent with every completion. Large photos are resized in your browser.` : `${attachments.length} of ${MAX_ATTACHMENTS} images attached.`}
             </span>
@@ -176,12 +166,38 @@ export function PromptForm({
   );
 }
 
-function AttachButton({ disabled, reason, onClick }: { disabled: boolean; reason: string | undefined; onClick: () => void }) {
-  const control = (
-    <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-[13px]" disabled={disabled} onClick={onClick} aria-describedby={reason ? "attach-reason" : undefined}>
+/**
+ * A native file input behind a label styled as a button. iOS Safari opens the photo picker reliably for a label
+ * activation, where a programmatic `click()` on a hidden input can be ignored; `accept="image/*"` is what makes
+ * iOS offer the photo library and camera (the declared types are checked after the pick, and HEIC photos are
+ * re-encoded in the browser).
+ */
+function AttachControl({ disabled, reason, onFiles }: { disabled: boolean; reason: string | undefined; onFiles: (files: readonly File[]) => void }) {
+  const control = disabled ? (
+    <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-[13px]" disabled aria-describedby={reason ? "attach-reason" : undefined}>
       <ImagePlus aria-hidden="true" className="size-3.5" />
       Attach images
     </Button>
+  ) : (
+    <label
+      htmlFor="attach-images"
+      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "relative h-8 cursor-pointer gap-1.5 px-2.5 text-[13px]")}
+    >
+      <ImagePlus aria-hidden="true" className="size-3.5" />
+      Attach images
+      <input
+        id="attach-images"
+        type="file"
+        accept="image/*"
+        multiple
+        aria-label="Image files"
+        className="absolute size-px opacity-0"
+        onChange={(event) => {
+          onFiles(Array.from(event.target.files ?? []));
+          event.target.value = "";
+        }}
+      />
+    </label>
   );
   if (reason === undefined) return control;
   return (
