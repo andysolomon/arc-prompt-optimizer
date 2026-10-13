@@ -78,6 +78,8 @@ export function PromptForm({
   const fileInput = useRef<HTMLInputElement>(null);
   const attachFull = attachments.length >= MAX_ATTACHMENTS;
   const canAttach = imagesAccepted && !attachFull;
+  /** Why the button is disabled, when it is. Shown next to the button when nothing is attached (hover tooltips never show on a phone) and in its tooltip. */
+  const attachReason = !imagesAccepted ? `${models.find((entry) => entry.id === model)?.label ?? "This model"} does not accept images.` : attachFull ? `At most ${MAX_ATTACHMENTS} images.` : undefined;
   return (
     <form
       className="flex flex-col rounded-[10px] border border-border bg-card shadow-[0_1px_2px_rgba(0,0,0,.04)]"
@@ -130,9 +132,13 @@ export function PromptForm({
                 event.target.value = "";
               }}
             />
-            <AttachButton disabled={!canAttach} reason={!imagesAccepted ? `${models.find((entry) => entry.id === model)?.label ?? "This model"} does not accept images.` : attachFull ? `At most ${MAX_ATTACHMENTS} images.` : undefined} onClick={() => fileInput.current?.click()} />
-            <span className="text-[11px] text-muted-foreground">
-              {attachments.length === 0 ? `Up to ${MAX_ATTACHMENTS} images, sent with every completion. Large photos are resized in your browser.` : `${attachments.length} of ${MAX_ATTACHMENTS} images attached.`}
+            <AttachButton disabled={!canAttach} reason={attachReason} onClick={() => fileInput.current?.click()} />
+            <span data-testid="attach-hint" className="text-[11px] text-muted-foreground">
+              {attachments.length > 0
+                ? `${attachments.length} of ${MAX_ATTACHMENTS} images attached.`
+                : imagesAccepted
+                  ? `Up to ${MAX_ATTACHMENTS} images, sent with every completion. Large photos are resized in your browser.`
+                  : `${attachReason} Pick a vision model to attach them.`}
             </span>
           </div>
           {attachments.length > 0 ? <AttachmentStrip attachments={attachments} onRemove={onRemoveAttachment} /> : null}

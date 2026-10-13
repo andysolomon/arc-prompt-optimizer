@@ -29,9 +29,12 @@ export const OPENAI_COMPATIBLE_BASE_URLS: Readonly<Record<"minimax" | "opencode-
 });
 
 /**
- * `vision` marks the models that take image attachments. The first-party Anthropic, OpenAI, and Google models do.
- * The MiniMax and OpenCode Go gateways are left off: their chat endpoints accept image parts syntactically, but
- * whether each model reads them is not verified here, so the UI does not offer attachments on them.
+ * `vision` marks the models that take image attachments. The first-party Anthropic, OpenAI, and Google models do,
+ * and so does MiniMax M3: MiniMax's OpenAI-compatible Chat Completions documents text, image, and video input for
+ * `MiniMax-M3` (and only that model of the two offered here), as `image_url` parts, which is what the AI SDK's
+ * OpenAI-compatible provider sends. MiniMax M2.7 and the OpenCode Go gateway are left off: their chat endpoints
+ * accept image parts syntactically, but whether each model reads them is not verified, so the UI does not offer
+ * attachments on them.
  */
 export const MODELS: readonly ModelDefinition[] = Object.freeze([
   {
@@ -72,7 +75,7 @@ export const MODELS: readonly ModelDefinition[] = Object.freeze([
     provider: "minimax",
     providerModelId: "MiniMax-M3",
     envVar: "MINIMAX_API_KEY",
-    vision: false,
+    vision: true,
   },
   {
     id: "minimax/MiniMax-M2.7",

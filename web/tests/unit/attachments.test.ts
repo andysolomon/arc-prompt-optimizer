@@ -38,7 +38,8 @@ describe("validateOptimizeBody with attachments", () => {
   });
 
   it("rejects attachments on models that do not take images", () => {
-    expect(validateOptimizeBody({ ...base, model: "minimax/MiniMax-M3", attachments: [png] }, all)).toMatchObject({ ok: false, status: 400, message: "Model 'minimax/MiniMax-M3' does not accept image attachments." });
+    expect(validateOptimizeBody({ ...base, model: "minimax/MiniMax-M2.7", attachments: [png] }, all)).toMatchObject({ ok: false, status: 400, message: "Model 'minimax/MiniMax-M2.7' does not accept image attachments." });
+    expect(validateOptimizeBody({ ...base, model: "minimax/MiniMax-M3", attachments: [png] }, all)).toMatchObject({ ok: true });
   });
 
   it("rejects too many images, a total over the limit, and a file whose bytes do not match its type", () => {
@@ -51,8 +52,9 @@ describe("validateOptimizeBody with attachments", () => {
 });
 
 describe("models", () => {
-  it("marks the first-party providers as vision and the gateways as text-only", () => {
-    expect(MODELS.filter((model) => model.vision).map((model) => model.provider)).toEqual(["anthropic", "anthropic", "openai", "google"]);
+  it("marks the first-party providers and MiniMax M3 as vision and the other gateway models as text-only", () => {
+    expect(MODELS.filter((model) => model.vision).map((model) => model.id)).toEqual(["anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5", "openai/gpt-5-mini", "google/gemini-2.5-flash", "minimax/MiniMax-M3"]);
+    expect(modelAcceptsImages("minimax/MiniMax-M2.7")).toBe(false);
     expect(modelAcceptsImages("google/gemini-2.5-flash")).toBe(true);
     expect(modelAcceptsImages("opencode-go/glm-5.3")).toBe(false);
     expect(modelAcceptsImages("nope")).toBe(false);
