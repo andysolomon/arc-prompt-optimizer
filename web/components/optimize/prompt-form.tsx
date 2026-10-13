@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Eraser } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SavePromptButton } from "@/components/library/prompt-editor-dialog";
@@ -31,6 +31,8 @@ export function PromptForm({
   refineAvailable,
   onRefineChange,
   canRun,
+  canClear,
+  onClear,
   onRequestRun,
 }: {
   prompt: string;
@@ -51,6 +53,10 @@ export function PromptForm({
   refineAvailable: boolean;
   onRefineChange: (value: boolean) => void;
   canRun: boolean;
+  /** Something to clear and no run in progress. */
+  canClear: boolean;
+  /** Clears the prompt, the rewrite details, and the previous result. */
+  onClear: () => void;
   onRequestRun: () => void;
 }) {
   const overLimit = prompt.length > MAX_PROMPT_CHARACTERS;
@@ -68,7 +74,13 @@ export function PromptForm({
           <label htmlFor="prompt" className="block text-sm font-medium">
             Prompt
           </label>
-          <SavePromptButton prompt={prompt} />
+          <div className="flex items-center gap-1.5">
+            <Button type="button" variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5 text-[13px]" disabled={!canClear} onClick={onClear} aria-label="New prompt">
+              <Eraser aria-hidden="true" className="size-3.5" />
+              New prompt
+            </Button>
+            <SavePromptButton prompt={prompt} />
+          </div>
         </div>
         <Textarea
           id="prompt"

@@ -101,7 +101,7 @@ async function evaluateConcurrently(
           controller.abort();
           if (!first || options.signal.aborted) throw error;
           const label = candidateLabel(candidate.metadata?.label, candidate.prompt.pattern).toLowerCase();
-          throw new Error(`The ${label} candidate failed: ${error instanceof Error ? error.message : String(error)}`);
+          throw new Error(`The ${label} candidate failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
         }),
       ),
     );

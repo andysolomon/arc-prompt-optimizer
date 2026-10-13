@@ -46,6 +46,7 @@ export function OptimizeView() {
     currentModelLabel,
     cancelRun,
     startRun,
+    startNewPrompt,
   } = useOptimizeSession();
 
   useEffect(() => {
@@ -92,6 +93,8 @@ export function OptimizeView() {
         refineAvailable={refineAvailable}
         onRefineChange={setRefine}
         canRun={canRun}
+        canClear={phase !== "running" && (prompt !== "" || context !== "" || useCase !== "" || result !== null)}
+        onClear={startNewPrompt}
         onRequestRun={() => setPhase("confirm")}
       />
 

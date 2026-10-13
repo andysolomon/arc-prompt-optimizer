@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { readServerEnv, mockProvidersEnabled, refineEnabled } from "@/lib/env";
 import { availableModels } from "@/lib/models";
-import { runOptimization } from "@/lib/optimize-run";
+import { randomUUID } from "node:crypto";
+import { runMeta, runObserved } from "@/lib/run-job";
 import { clientIp, rateLimitMessage, rateLimiterFor } from "@/lib/ratelimit";
 import { MODEL_IDS, type StepEvent } from "@/lib/types";
 import { validateOptimizeBody } from "@/lib/validate";
@@ -49,9 +50,10 @@ export async function POST(request: Request): Promise<Response> {
   if (!validation.ok) return NextResponse.json({ error: validation.message }, { status: validation.status });
   const input = validation.value;
 
+  const runId = randomUUID();
   if (!wantsEventStream(request)) {
     try {
-      const result = await runOptimization(input, { env, signal: request.signal, emit: () => {} });
+      const result = await runObserved(input, { env, signal: request.signal, emit: () => {}, meta: runMeta(runId, "json", input) });
       return NextResponse.json(result);
     } catch (error) {
       if (request.signal.aborted) return new Response(null, { status: 499 });
@@ -81,7 +83,7 @@ export async function POST(request: Request): Promise<Response> {
         }
       };
       const emit = (event: StepEvent) => send(event.step, event);
-      runOptimization(input, { env, signal: request.signal, emit })
+      runObserved(input, { env, signal: request.signal, emit, meta: runMeta(runId, "stream", input) })
         .then((result) => send("result", result))
         .catch((error: unknown) => {
           if (!request.signal.aborted) send("error", { error: errorMessage(error) });
