@@ -492,24 +492,95 @@ describe("concurrent candidate runs", () => {
     expect(peak).toBe(4);
   });
 
-  it("names the failing candidate and aborts the others", async () => {
-    const aborted: string[] = [];
+  it("keeps the candidates that finished when one fails, reports the failure, and leaves it out of the ranking", async () => {
+    const steps: StepEvent[] = [];
     const adapter: CompletionAdapter = {
-      complete(request, signal) {
-        if (request.prompt.startsWith("<task>")) return Promise.reject(new Error("provider overloaded"));
-        return new Promise((_resolve, reject) => {
-          signal?.addEventListener("abort", () => {
-            aborted.push(request.prompt.slice(0, 10));
-            reject(new Error("aborted"));
-          });
-        });
+      async complete(request) {
+        if (request.prompt.startsWith("<task>")) throw Object.assign(new Error("Completion timed out after 120000ms."), { name: "CompletionTimeoutError", code: "TIMEOUT" });
+        return { text: `out ${request.prompt.length}`, latencyMs: 10 };
       },
+    };
+    const result = await runOptimization(
+      { prompt: "Summarize this.", model: "openai/gpt-5-mini", judge: true, rewrite: false },
+      { env: { ARC_MOCK_PROVIDERS: "1" }, signal: new AbortController().signal, emit: (event) => steps.push(event), adapter },
+    );
+    expect(result.candidates).toHaveLength(4);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatchObject({ label: "Critique", error: { kind: "timeout", name: "CompletionTimeoutError", message: "Completion timed out after 120000ms." } });
+    const failedId = result.failures[0]!.candidateId;
+    expect(result.evaluations.map((entry) => entry.candidateId)).not.toContain(failedId);
+    expect(result.ranking.map((entry) => entry.candidateId)).not.toContain(failedId);
+    expect(result.ranking).toHaveLength(3);
+    // The failed completion still counts as requested, the judge only sees the candidates that produced output.
+    expect(result.completionsUsed).toBe(4);
+    expect(result.judge.status === "judged" ? Object.keys(result.judge.answers) : []).toHaveLength(3);
+    expect(steps.find((event) => event.step === `run:${failedId}`)).toEqual({ step: `run:${failedId}`, status: "failed", error: result.failures[0]!.error });
+  });
+
+  it("fails the run, naming the first candidate, only when no candidate finished", async () => {
+    const adapter: CompletionAdapter = {
+      complete: () => Promise.reject(Object.assign(new Error("provider overloaded"), { name: "APICallError", statusCode: 503 })),
     };
     const run = runOptimization(
       { prompt: "Summarize this.", model: "openai/gpt-5-mini", judge: false, rewrite: false },
       { env: {}, signal: new AbortController().signal, emit: () => {}, adapter },
     );
-    await expect(run).rejects.toThrow("The critique candidate failed: provider overloaded");
-    expect(aborted).toHaveLength(3);
+    await expect(run).rejects.toThrow("The baseline candidate failed: provider overloaded");
+    await expect(run).rejects.toMatchObject({ cause: { statusCode: 503 } });
+  });
+
+  it("stops the loop when the rewrite's own run fails, and ranks the rest", async () => {
+    const adapter = new RewritingAdapter(PLAN, (prompt) => {
+      if (prompt === REWRITTEN) throw Object.assign(new Error("Completion timed out after 60000ms."), { name: "CompletionTimeoutError", code: "TIMEOUT" });
+      return "short output";
+    });
+    const result = await runOptimization(
+      { prompt: "Summarize this.", model: "openai/gpt-5-mini", judge: false, rewrite: true },
+      { env: {}, signal: new AbortController().signal, emit: () => {}, adapter },
+    );
+    expect(result.rewrite.status).toBe("rewritten");
+    expect(result.failures.map((failure) => failure.label)).toEqual(["Rewrite"]);
+    expect(result.loop).toEqual({ rounds: 0, stoppedBecause: "candidate_failed" });
+    expect(result.revisions).toEqual([]);
+    expect(result.ranking).toHaveLength(result.candidates.length - 1);
+  });
+
+  it("keeps a revision whose run failed out of the ranking and stops revising", async () => {
+    let revisionsRun = 0;
+    const adapter = new RewritingAdapter(PLAN, (prompt) => {
+      if (prompt.startsWith("Use at most 10 words.")) {
+        revisionsRun += 1;
+        throw Object.assign(new Error("Provider returned 502"), { name: "APICallError", statusCode: 502 });
+      }
+      return prompt === REWRITTEN ? "far too many words ".repeat(20) : "short output";
+    });
+    const result = await runOptimization(
+      { prompt: "Summarize this.", model: "openai/gpt-5-mini", judge: false, rewrite: true },
+      { env: {}, signal: new AbortController().signal, emit: () => {}, adapter },
+    );
+    expect(revisionsRun).toBe(1);
+    expect(result.revisions).toHaveLength(1);
+    expect(result.loop).toEqual({ rounds: 1, stoppedBecause: "candidate_failed" });
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatchObject({ label: "Rewrite v2", error: { kind: "provider", statusCode: 502 } });
+    expect(result.ranking.map((entry) => entry.candidateId)).not.toContain(result.failures[0]!.candidateId);
+  });
+
+  it("still stops at once when the run is cancelled mid-round", async () => {
+    const controller = new AbortController();
+    const adapter: CompletionAdapter = {
+      complete(request, signal) {
+        if (request.prompt.startsWith("<task>")) return Promise.resolve({ text: "done", latencyMs: 1 });
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(Object.assign(new Error("Completion cancelled."), { name: "CompletionCancelledError", code: "CANCELLED" })));
+          setTimeout(() => controller.abort(), 5);
+        });
+      },
+    };
+    const run = runOptimization(
+      { prompt: "Summarize this.", model: "openai/gpt-5-mini", judge: false, rewrite: false },
+      { env: {}, signal: controller.signal, emit: () => {}, adapter },
+    );
+    await expect(run).rejects.toThrow("Completion cancelled.");
   });
 });

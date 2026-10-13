@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse, after } from "next/server";
+import { describeClient } from "@/lib/client-info";
 import { readServerEnv, mockProvidersEnabled, refineEnabled } from "@/lib/env";
 import { availableModels } from "@/lib/models";
 import { clientIp, rateLimitMessage, rateLimiterFor } from "@/lib/ratelimit";
@@ -44,7 +45,8 @@ export async function POST(request: Request): Promise<Response> {
   const store = runStoreFor(env);
   const id = randomUUID();
   await store.save(newRunRecord(id, input));
-  after(() => executeRun(id, input, { env, store }));
+  const client = describeClient(request.headers);
+  after(() => executeRun(id, input, { env, store, client }));
   return NextResponse.json({ id, status: "running" }, { status: 202, headers: NO_STORE });
 }
 

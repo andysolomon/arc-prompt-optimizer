@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { progressPercent, type StepState } from "@/lib/client/steps";
@@ -40,11 +40,14 @@ export function ProgressPanel({
       <ol className="m-0 flex list-none flex-col gap-2 p-0 text-sm">
         {state.steps.map((step) => {
           const done = state.done.includes(step.key);
+          const failed = state.failed?.includes(step.key) ?? false;
           const active = activeKeys.has(step.key);
           return (
             <li key={step.key} className={cn("flex items-center gap-2.5", done || active ? "text-foreground" : "text-muted-foreground")}>
               <span className="inline-flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
-                {done ? (
+                {failed ? (
+                  <X className="size-3.5 text-destructive" strokeWidth={2.5} />
+                ) : done ? (
                   <Check className="size-3.5" strokeWidth={2.5} />
                 ) : active ? (
                   <span className="inline-block size-3 rounded-full border-2 border-border border-t-foreground [animation:arc-spin_.8s_linear_infinite]" />
@@ -54,7 +57,7 @@ export function ProgressPanel({
               </span>
               <span>
                 {step.label}
-                <span className="sr-only">{done ? " (done)" : active ? " (in progress)" : " (pending)"}</span>
+                <span className="sr-only">{failed ? "" : done ? " (done)" : active ? " (in progress)" : " (pending)"}</span>
               </span>
             </li>
           );

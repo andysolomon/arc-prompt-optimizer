@@ -2,11 +2,13 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { RunCancelledError, RunUnavailableError, discardRun, followRun, startRun as startServerRun } from "@/lib/client/runs";
+import { isRunFailure, type RunFailure } from "@/lib/client/failure";
+import { OptimizeRequestError, RunCancelledError, RunFailedError, RunLostError, RunUnavailableError, discardRun, followRun, startRun as startServerRun } from "@/lib/client/runs";
 import { defaultSelectionId } from "@/lib/client/selection";
+import { reportClientEvent } from "@/lib/client/telemetry";
 import { prepareImage, type LocalAttachment } from "@/lib/client/images";
 import { advanceSteps, planSteps, type StepState } from "@/lib/client/steps";
-import { modelAcceptsImages, modelLabel } from "@/lib/models";
+import { isModelId, modelAcceptsImages, modelLabel } from "@/lib/models";
 import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENTS_TOTAL_BYTES,
@@ -23,8 +25,8 @@ import {
 const SESSION_KEY = "arc-po-session";
 /** The run in progress, kept in localStorage so a reload, a backgrounded tab, or a new tab can pick it back up. */
 const ACTIVE_RUN_KEY = "arc-po-active-run";
-/** Runs older than this are not resumed: the server bounds a run at 300 s and keeps its result for 30 minutes. */
-export const RESUME_WINDOW_MS = 10 * 60 * 1000;
+/** Runs older than this are not resumed; it matches how long the server keeps a run's record (`RUN_TTL_MS`). */
+export const RESUME_WINDOW_MS = 30 * 60 * 1000;
 /** The model rewrites every prompt before the run; the API also accepts `rewrite: false`. */
 export const REWRITE = true;
 
@@ -41,6 +43,8 @@ interface PersistedSession {
   selectedId: string | null;
   edited: Record<string, string>;
   attachments: LocalAttachment[];
+  /** Why the last run produced nothing, until dismissed or a new run starts. */
+  failure: RunFailure | null;
 }
 
 function isLocalAttachment(value: unknown): value is LocalAttachment {
@@ -56,13 +60,13 @@ interface ActiveRun {
   refineRounds: number;
 }
 
-function loadActiveRun(now = Date.now()): ActiveRun | undefined {
+/** The stored run, whether or not it is still within the resume window; the caller decides what to do with a stale one. */
+function loadActiveRun(): ActiveRun | undefined {
   try {
     const raw = localStorage.getItem(ACTIVE_RUN_KEY);
     if (!raw) return undefined;
     const parsed = JSON.parse(raw) as Partial<ActiveRun>;
     if (typeof parsed.id !== "string" || typeof parsed.startedAt !== "number") return undefined;
-    if (now - parsed.startedAt > RESUME_WINDOW_MS) return undefined;
     return {
       id: parsed.id,
       startedAt: parsed.startedAt,
@@ -105,11 +109,13 @@ function loadSession(): PersistedSession | undefined {
             revisions: parsed.result.revisions ?? [],
             loop: parsed.result.loop ?? { rounds: 0, stoppedBecause: "not_requested" },
             refine: parsed.result.refine ?? { status: "not_requested" },
+            failures: parsed.result.failures ?? [],
           }
         : null,
       selectedId: typeof parsed.selectedId === "string" ? parsed.selectedId : null,
       edited: parsed.edited ?? {},
       attachments: Array.isArray(parsed.attachments) ? parsed.attachments.filter(isLocalAttachment) : [],
+      failure: isRunFailure(parsed.failure) ? parsed.failure : null,
     };
   } catch {
     return undefined;
@@ -134,15 +140,23 @@ function useSessionState() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [edited, setEdited] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
+  const [failure, setFailure] = useState<RunFailure | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const [pendingResume, setPendingResume] = useState<ActiveRun | null>(null);
 
   // Restore the last prompt and result from sessionStorage so a refresh does not lose them.
   useEffect(() => {
     const session = loadSession();
-    const active = loadActiveRun();
+    const stored = loadActiveRun();
+    const age = stored === undefined ? 0 : Date.now() - stored.startedAt;
+    const active = stored !== undefined && age <= RESUME_WINDOW_MS ? stored : undefined;
     if (active) setPendingResume(active);
     else saveActiveRun(null);
+    if (stored !== undefined && active === undefined) {
+      // The run's result expired on the server before this page came back: say so rather than show an empty form.
+      setFailure({ kind: "abandoned", message: `An optimization started ${Math.round(age / 60_000)} minutes ago was not picked up before its result expired.`, model: stored.model, at: Date.now(), runId: stored.id });
+      reportClientEvent({ event: "run_abandoned", runId: stored.id, ageMs: Math.round(age), ...(isModelId(stored.model) ? { model: stored.model } : {}) });
+    }
     if (session) {
       setPrompt(session.prompt);
       setContext(session.context);
@@ -154,6 +168,7 @@ function useSessionState() {
       setSelectedId(session.selectedId);
       setEdited(session.edited);
       setAttachments(session.attachments);
+      if (session.failure && !active) setFailure((current) => current ?? session.failure);
       if (session.result && !active) setPhase("done");
     }
     setHydrated(true);
@@ -162,7 +177,7 @@ function useSessionState() {
   useEffect(() => {
     if (!hydrated) return;
     try {
-      const session: PersistedSession = { prompt, context, useCase, model, judge, refine, result, selectedId, edited, attachments };
+      const session: PersistedSession = { prompt, context, useCase, model, judge, refine, result, selectedId, edited, attachments, failure };
       try {
         sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
       } catch {
@@ -172,7 +187,7 @@ function useSessionState() {
     } catch {
       /* storage unavailable or full */
     }
-  }, [hydrated, prompt, context, useCase, model, judge, refine, result, selectedId, edited, attachments]);
+  }, [hydrated, prompt, context, useCase, model, judge, refine, result, selectedId, edited, attachments, failure]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -229,6 +244,8 @@ function useSessionState() {
       const controller = new AbortController();
       controllerRef.current = controller;
       setPhase("running");
+      setFailure(null);
+      const modelForEvents = isModelId(run.model) ? { model: run.model } : {};
       try {
         const next = await followRun(run.id, controller.signal, (event) => {
           if (!controller.signal.aborted) setStepState((state) => advanceSteps(state, event));
@@ -247,10 +264,31 @@ function useSessionState() {
       } catch (error) {
         if (controller.signal.aborted) return;
         saveActiveRun(null);
-        if (error instanceof RunCancelledError) toast.info("The run was cancelled.");
-        else if (error instanceof RunUnavailableError) toast.error(error.message);
-        else toast.error(error instanceof Error ? error.message : "Optimization failed.");
-        if (!(error instanceof RunUnavailableError)) void discardRun(run.id);
+        const followedMs = Math.max(0, Date.now() - run.startedAt);
+        const at = Date.now();
+        if (error instanceof RunCancelledError) {
+          toast.info("The run was cancelled.");
+        } else if (error instanceof RunFailedError) {
+          // The record stays on the server for its TTL so the run id in the panel can still be looked up.
+          setFailure({ kind: error.kind, message: error.message, model: run.model, at, runId: run.id, ...(error.statusCode === undefined ? {} : { statusCode: error.statusCode }), ...(error.lastStep === undefined ? {} : { lastStep: error.lastStep }) });
+          reportClientEvent({ event: "run_failed", runId: run.id, kind: error.kind, message: error.message, followedMs, ...modelForEvents, ...(error.statusCode === undefined ? {} : { statusCode: error.statusCode }), ...(error.lastStep === undefined ? {} : { lastStep: error.lastStep }) });
+          toast.error(error.message);
+        } else if (error instanceof RunUnavailableError) {
+          setFailure({ kind: "unavailable", message: error.message, model: run.model, at, runId: run.id });
+          reportClientEvent({ event: "run_unavailable", runId: run.id, followedMs, ...modelForEvents });
+          toast.error(error.message);
+        } else if (error instanceof RunLostError) {
+          setFailure({ kind: "lost", message: error.message, model: run.model, at, runId: run.id });
+          reportClientEvent({ event: "run_lost", runId: run.id, message: error.reason, followedMs, ...modelForEvents });
+          toast.error(error.message);
+          void discardRun(run.id);
+        } else {
+          const message = error instanceof Error ? error.message : "Optimization failed.";
+          setFailure({ kind: "unknown", message, model: run.model, at, runId: run.id });
+          reportClientEvent({ event: "run_lost", runId: run.id, message, followedMs, ...modelForEvents });
+          toast.error(message);
+          void discardRun(run.id);
+        }
         setPhase("idle");
       } finally {
         if (controllerRef.current === controller) controllerRef.current = null;
@@ -279,6 +317,8 @@ function useSessionState() {
     if (active) void discardRun(active.id);
     setPhase(result ? "done" : "idle");
   }, [result]);
+
+  const dismissFailure = useCallback(() => setFailure(null), []);
 
   const addAttachments = useCallback(
     async (files: readonly File[]) => {
@@ -325,6 +365,7 @@ function useSessionState() {
     setResult(null);
     setSelectedId(null);
     setEdited({});
+    setFailure(null);
     setPhase("idle");
   }, []);
 
@@ -341,6 +382,7 @@ function useSessionState() {
     setResult(null);
     setSelectedId(null);
     setEdited({});
+    setFailure(null);
     setPhase("idle");
   }, []);
 
@@ -353,6 +395,7 @@ function useSessionState() {
     setResult(null);
     setSelectedId(null);
     setEdited({});
+    setFailure(null);
     let id: string;
     try {
       id = await startServerRun({
@@ -366,7 +409,11 @@ function useSessionState() {
         ...(attachments.length === 0 ? {} : { attachments: attachments.map(({ name, type, data }) => ({ name, type, data })) }),
       });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Optimization failed.");
+      const message = error instanceof Error ? error.message : "Optimization failed.";
+      const statusCode = error instanceof OptimizeRequestError ? error.status : undefined;
+      setFailure({ kind: "rejected", message, model, at: Date.now(), ...(statusCode === undefined ? {} : { statusCode }) });
+      reportClientEvent({ event: "run_start_failed", message, ...(statusCode === undefined ? {} : { statusCode }), ...(isModelId(model) ? { model } : {}) });
+      toast.error(message);
       setPhase("idle");
       return;
     }
@@ -414,6 +461,8 @@ function useSessionState() {
     cancelRun,
     startRun,
     startNewPrompt,
+    failure,
+    dismissFailure,
   };
 }
 
