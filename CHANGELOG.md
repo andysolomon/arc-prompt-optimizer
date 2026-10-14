@@ -1,3 +1,5 @@
+## [0.15.2](https://github.com/andysolomon/arc-prompt-optimizer/compare/v0.15.1...v0.15.2) (2026-10-14)
+
 ## [0.15.1](https://github.com/andysolomon/arc-prompt-optimizer/compare/v0.15.0...v0.15.1) (2026-10-13)
 
 ## [0.15.0](https://github.com/andysolomon/arc-prompt-optimizer/compare/v0.14.0...v0.15.0) (2026-10-13)
