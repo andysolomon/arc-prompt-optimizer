@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/optimize/confirm-dialog";
+import { FailurePanel } from "@/components/optimize/failure-panel";
 import { ProgressPanel } from "@/components/optimize/progress-panel";
 import { PromptForm } from "@/components/optimize/prompt-form";
 import { ResultPanel } from "@/components/optimize/result-panel";
@@ -52,6 +53,8 @@ export function OptimizeView() {
     cancelRun,
     startRun,
     startNewPrompt,
+    failure,
+    dismissFailure,
   } = useOptimizeSession();
 
   useEffect(() => {
@@ -110,6 +113,10 @@ export function OptimizeView() {
 
       {phase === "running" ? (
         <ProgressPanel modelLabel={currentModelLabel} state={stepState} onCancel={cancelRun} />
+      ) : null}
+
+      {failure !== null && phase !== "running" ? (
+        <FailurePanel failure={failure} canRetry={canRun} onRetry={() => setPhase("confirm")} onDismiss={dismissFailure} />
       ) : null}
 
       {phase === "done" && result ? (

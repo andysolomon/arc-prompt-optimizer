@@ -1,5 +1,5 @@
 import { OptimizeRequestError } from "@/lib/client/sse";
-import type { OptimizeRequestBody, OptimizeResult, StepEvent } from "@/lib/types";
+import type { OptimizeRequestBody, OptimizeResult, RunErrorInfo, StepEvent } from "@/lib/types";
 
 export { OptimizeRequestError };
 
@@ -11,7 +11,7 @@ export interface RunStatusResponse {
   readonly createdAt: number;
   readonly steps: readonly StepEvent[];
   readonly result?: OptimizeResult;
-  readonly error?: { readonly kind: string; readonly message: string };
+  readonly error?: RunErrorInfo;
 }
 
 export const RUNS_ENDPOINT = "/api/optimize/runs";
@@ -25,6 +25,31 @@ export class RunCancelledError extends Error {
   constructor() {
     super("The run was cancelled.");
     this.name = "RunCancelledError";
+  }
+}
+
+/** The run ended `failed` on the server; carries the server's error summary so the UI can explain it. */
+export class RunFailedError extends Error {
+  readonly kind: RunErrorInfo["kind"];
+  readonly statusCode: number | undefined;
+  /** The last step that completed before the failure, when the record shows one. */
+  readonly lastStep: string | undefined;
+  constructor(error: RunErrorInfo | undefined, lastStep?: string) {
+    super(error?.message ?? "Optimization failed.");
+    this.name = "RunFailedError";
+    this.kind = error?.kind ?? "unknown";
+    this.statusCode = error?.statusCode;
+    this.lastStep = lastStep;
+  }
+}
+
+/** This page could not reach the server, or the run did not finish, before the page's own deadline. */
+export class RunLostError extends Error {
+  readonly reason: "unreachable" | "overdue";
+  constructor(reason: "unreachable" | "overdue") {
+    super(reason === "unreachable" ? "Lost contact with the server while the run was in progress. Check your connection and start it again." : "The run did not finish in time. Start it again.");
+    this.name = "RunLostError";
+    this.reason = reason;
   }
 }
 
@@ -132,7 +157,7 @@ export async function followRun(id: string, signal: AbortSignal, onStep: (event:
     } catch (error) {
       if (signal.aborted) throw abortError();
       // Unreachable server: keep trying until the run's own deadline.
-      if (now() > deadline) throw new Error("Lost contact with the server while the run was in progress. Check your connection and start it again.");
+      if (now() > deadline) throw new RunLostError("unreachable");
       void error;
     }
     if (response !== undefined) {
@@ -142,9 +167,9 @@ export async function followRun(id: string, signal: AbortSignal, onStep: (event:
         for (const event of record.steps.slice(applied)) onStep(event);
         applied = record.steps.length;
         if (record.status === "done" && record.result !== undefined) return record.result;
-        if (record.status === "failed") throw new Error(record.error?.message ?? "Optimization failed.");
+        if (record.status === "failed") throw new RunFailedError(record.error, record.steps.at(-1)?.step);
         if (record.status === "cancelled") throw new RunCancelledError();
-        if (now() > deadline) throw new Error("The run did not finish in time. Start it again.");
+        if (now() > deadline) throw new RunLostError("overdue");
       } else if (response.status >= 500 || response.status === 429) {
         // Transient server trouble: retry on the next poll.
         if (now() > deadline) throw await errorFrom(response);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RunCancelledError, RunUnavailableError, followRun, startRun, type RunStatusResponse } from "@/lib/client/runs";
+import { RunCancelledError, RunFailedError, RunLostError, RunUnavailableError, followRun, startRun, type RunStatusResponse } from "@/lib/client/runs";
 import { OptimizeRequestError } from "@/lib/client/sse";
 import type { OptimizeResult } from "@/lib/types";
 
@@ -71,11 +71,17 @@ describe("followRun", () => {
     const { fetchFn } = scripted([running([]), () => { throw new TypeError("Load failed"); }, () => { throw new TypeError("Load failed"); }]);
     const follow = followRun("r1", new AbortController().signal, () => {}, { fetch: fetchFn, wait: async () => { now += 60_000; }, now: () => now, maxFollowMs: 90_000 });
     await expect(follow).rejects.toThrow(/Lost contact with the server/u);
+    await expect(follow).rejects.toMatchObject({ name: "RunLostError", reason: "unreachable" });
   });
 
   it("fails with the server's error summary, a cancellation, or an expired run", async () => {
-    const failed = scripted([{ ...running([{ step: "rewrite", status: "rewritten" }]), status: "failed", error: { kind: "timeout", message: "The baseline candidate failed: Completion timed out after 120000ms." } }]);
-    await expect(followRun("r1", new AbortController().signal, () => {}, { fetch: failed.fetchFn, wait: immediate })).rejects.toThrow("Completion timed out after 120000ms.");
+    const failed = scripted([{ ...running([{ step: "rewrite", status: "rewritten" }, { step: "render", candidateIds: ["a"] }]), status: "failed", error: { kind: "timeout", name: "Error", message: "The baseline candidate failed: Completion timed out after 120000ms." } }]);
+    const failure = await followRun("r1", new AbortController().signal, () => {}, { fetch: failed.fetchFn, wait: immediate }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(RunFailedError);
+    // The page keeps the kind and the last step reached so it can explain the failure and name where it stopped.
+    expect(failure).toMatchObject({ kind: "timeout", lastStep: "render", message: "The baseline candidate failed: Completion timed out after 120000ms." });
+    const rejected = scripted([{ ...running([]), status: "failed", error: { kind: "provider", name: "APICallError", message: "Provider returned 503", statusCode: 503 } }]);
+    await expect(followRun("r1", new AbortController().signal, () => {}, { fetch: rejected.fetchFn, wait: immediate })).rejects.toMatchObject({ kind: "provider", statusCode: 503, lastStep: undefined });
     const cancelled = scripted([{ ...running([]), status: "cancelled" }]);
     await expect(followRun("r1", new AbortController().signal, () => {}, { fetch: cancelled.fetchFn, wait: immediate })).rejects.toBeInstanceOf(RunCancelledError);
     const gone = scripted([json({ error: "This run is no longer available." }, 404)]);
@@ -87,5 +93,12 @@ describe("followRun", () => {
     const { fetchFn } = scripted([running([]), running([])]);
     const follow = followRun("r1", controller.signal, () => {}, { fetch: fetchFn, wait: async (_ms, signal) => { controller.abort(); if (signal.aborted) throw new DOMException("aborted", "AbortError"); } });
     await expect(follow).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("RunLostError", () => {
+  it("names the reason the page gave up", () => {
+    expect(new RunLostError("overdue").message).toBe("The run did not finish in time. Start it again.");
+    expect(new RunLostError("unreachable").reason).toBe("unreachable");
   });
 });

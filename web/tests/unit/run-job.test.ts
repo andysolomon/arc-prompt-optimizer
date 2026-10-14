@@ -58,6 +58,30 @@ describe("executeRun", () => {
     expect(JSON.stringify(lines)).not.toContain("incident report");
   });
 
+  it("logs the client that started the run and a candidate that failed mid-run at error level", async () => {
+    const store = new MemoryRunStore();
+    const { lines, sink } = collector();
+    let calls = 0;
+    const adapter: CompletionAdapter = {
+      async complete(request) {
+        calls += 1;
+        if (request.prompt.startsWith("<task>")) throw Object.assign(new Error("Completion timed out after 60000ms."), { name: "CompletionTimeoutError", code: "TIMEOUT" });
+        return { text: `out ${request.prompt.length}`, latencyMs: 5 };
+      },
+    };
+    const client = { mobile: true, platform: "ios", browser: "safari" } as const;
+    const record = await executeRun("run-partial", { ...input, rewrite: false }, { env: {}, store, sink, adapter, client });
+    expect(record.status).toBe("done");
+    expect(record.result?.failures).toHaveLength(1);
+    expect(calls).toBe(4);
+    expect(lines[0]?.line).toMatchObject({ event: "arc.run.started", client });
+    const failed = lines.find((entry) => entry.line.event === "arc.run.candidate_failed");
+    expect(failed?.level).toBe("error");
+    expect(failed?.line).toMatchObject({ runId: "run-partial", client, error: { kind: "timeout" } });
+    expect(lines.at(-1)?.line).toMatchObject({ event: "arc.run.completed", candidates: 4, candidatesFailed: 1 });
+    expect(record.steps.find((step) => step.status === "failed")?.error).toMatchObject({ kind: "timeout" });
+  });
+
   it("stores a failure summary and logs it at error level", async () => {
     const store = new MemoryRunStore();
     const { lines, sink } = collector();

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { describeClient } from "@/lib/client-info";
 import { readServerEnv, mockProvidersEnabled, refineEnabled } from "@/lib/env";
 import { availableModels } from "@/lib/models";
 import { randomUUID } from "node:crypto";
@@ -51,9 +52,10 @@ export async function POST(request: Request): Promise<Response> {
   const input = validation.value;
 
   const runId = randomUUID();
+  const client = describeClient(request.headers);
   if (!wantsEventStream(request)) {
     try {
-      const result = await runObserved(input, { env, signal: request.signal, emit: () => {}, meta: runMeta(runId, "json", input) });
+      const result = await runObserved(input, { env, signal: request.signal, emit: () => {}, meta: runMeta(runId, "json", input, client) });
       return NextResponse.json(result);
     } catch (error) {
       if (request.signal.aborted) return new Response(null, { status: 499 });
@@ -83,7 +85,7 @@ export async function POST(request: Request): Promise<Response> {
         }
       };
       const emit = (event: StepEvent) => send(event.step, event);
-      runObserved(input, { env, signal: request.signal, emit, meta: runMeta(runId, "stream", input) })
+      runObserved(input, { env, signal: request.signal, emit, meta: runMeta(runId, "stream", input, client) })
         .then((result) => send("result", result))
         .catch((error: unknown) => {
           if (!request.signal.aborted) send("error", { error: errorMessage(error) });

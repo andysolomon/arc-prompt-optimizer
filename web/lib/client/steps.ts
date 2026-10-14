@@ -9,6 +9,8 @@ export interface StepItem {
 export interface StepState {
   readonly steps: readonly StepItem[];
   readonly done: readonly string[];
+  /** Keys of candidate runs whose completion failed; they are done, but not with an output. */
+  readonly failed?: readonly string[];
 }
 
 const PLANNED_RUN = "planned-run:";
@@ -70,8 +72,14 @@ export function advanceSteps(state: StepState, event: StepEvent): StepState {
   if (event.step.startsWith("refine:") && event.improved !== undefined) {
     steps = steps.map((step) => (step.key === event.step ? { key: step.key, label: `${step.label} (${event.improved ? "improved" : "no gain"})` } : step));
   }
+  let failed = state.failed ?? [];
+  if (event.step.startsWith("run:") && event.status === "failed") {
+    const reason = event.error === undefined ? "failed" : `failed: ${event.error.message}`;
+    steps = steps.map((step) => (step.key === key ? { key: step.key, label: `${step.label} (${reason})` } : step));
+    if (!failed.includes(key)) failed = [...failed, key];
+  }
   const done = state.done.includes(key) ? state.done : [...state.done, key];
-  return { steps, done };
+  return { steps, done, failed };
 }
 
 export function progressPercent(doneCount: number, total: number): number {
