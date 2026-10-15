@@ -45,6 +45,16 @@ describe("steps", () => {
     expect(state.done).toEqual(["rewrite", "render", "revise:2", "run:r2", "revise:3"]);
   });
 
+  it("marks a candidate whose completion failed as done, with the reason, so the progress list stops waiting on it", () => {
+    let state = planSteps(false, false);
+    state = advanceSteps(state, { step: "render", candidateIds: ["b", "c"], candidateLabels: ["Baseline", "Critique"] });
+    state = advanceSteps(state, { step: "run:c", status: "failed", error: { kind: "timeout", name: "CompletionTimeoutError", message: "Completion timed out after 60000ms." } });
+    expect(state.done).toEqual(["render", "run:c"]);
+    expect(state.failed).toEqual(["run:c"]);
+    expect(state.steps.find((s) => s.key === "run:c")!.label).toBe("Run critique (failed: Completion timed out after 60000ms.)");
+    expect(advanceSteps(state, { step: "run:b" }).failed).toEqual(["run:c"]);
+  });
+
   it("plans one refine step per round before ranking and labels it with the round's outcome", () => {
     const planned = planSteps(true, true, 2);
     expect(planned.steps.slice(-3).map((s) => s.key)).toEqual(["refine:1", "refine:2", "rank"]);

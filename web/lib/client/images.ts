@@ -62,17 +62,25 @@ async function toBase64(blob: Blob): Promise<string> {
 
 /**
  * Downscales an image to {@link MAX_IMAGE_EDGE} and re-encodes it so it fits the per-image limit: PNG stays PNG
- * when that is small enough (it keeps transparency and sharp text), otherwise JPEG. A file already within the
- * limits and the size is sent as is, so an animated GIF or an exact PNG is not re-encoded needlessly.
+ * when that is small enough (it keeps transparency and sharp text), otherwise JPEG. A JPEG, PNG, WebP, or GIF
+ * already within the limits is sent as is, so an animated GIF or an exact PNG is not re-encoded needlessly; other
+ * decodable formats such as HEIC are always re-encoded.
  */
 export async function prepareImage(file: File, maxBytes = MAX_ATTACHMENT_BYTES): Promise<LocalAttachment> {
-  if (!isAttachmentType(file.type)) throw new Error(`${file.name || "That file"} is not a JPEG, PNG, WebP, or GIF image.`);
-  const source = await decode(file);
+  // Any image the browser can decode is accepted (iOS hands over HEIC photos); only the four wire types pass through unchanged.
+  if (!file.type.startsWith("image/")) throw new Error(`${file.name || "That file"} is not a JPEG, PNG, WebP, or GIF image.`);
+  let source: ImageBitmap | HTMLImageElement;
+  try {
+    source = await decode(file);
+  } catch {
+    throw new Error(`${file.name || "That file"} is not a JPEG, PNG, WebP, or GIF image.`);
+  }
   const width = "naturalWidth" in source ? source.naturalWidth : source.width;
   const height = "naturalHeight" in source ? source.naturalHeight : source.height;
   const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
   const name = file.name || "image";
-  if (file.size <= maxBytes && Math.max(width, height) <= MAX_IMAGE_EDGE) {
+  if (isAttachmentType(file.type) && file.size <= maxBytes && Math.max(width, height) <= MAX_IMAGE_EDGE) {
+    if ("close" in source) source.close();
     return { id, name, type: file.type, data: await toBase64(file), width, height, bytes: file.size };
   }
   const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(width, height));

@@ -1,11 +1,12 @@
 import "server-only";
+import type { ClientInfo } from "@/lib/client-info";
 import type { ServerEnv } from "@/lib/env";
 import { runOptimization, type RunOptions } from "@/lib/optimize-run";
 import { RunObserver, describeError, type RunLogSink, type RunMeta, type RunTransport } from "@/lib/run-log";
 import type { RunRecord, RunStore } from "@/lib/run-store";
 import { attachmentInfo, type OptimizeRequest, type OptimizeResult, type StepEvent } from "@/lib/types";
 
-export function runMeta(runId: string, transport: RunTransport, input: OptimizeRequest): RunMeta {
+export function runMeta(runId: string, transport: RunTransport, input: OptimizeRequest, client?: ClientInfo): RunMeta {
   return {
     runId,
     transport,
@@ -14,6 +15,7 @@ export function runMeta(runId: string, transport: RunTransport, input: OptimizeR
     rewrite: input.rewrite,
     ...(input.refine === undefined ? {} : { refine: input.refine }),
     attachments: input.attachments?.length ?? 0,
+    ...(client === undefined ? {} : { client }),
   };
 }
 
@@ -64,6 +66,8 @@ export interface ExecuteRunOptions {
   readonly env: ServerEnv;
   readonly store: RunStore;
   readonly sink?: RunLogSink;
+  /** The browser that started the run, for the log lines. */
+  readonly client?: ClientInfo;
   readonly now?: () => number;
   /** Test seams forwarded to the run. */
   readonly adapter?: RunOptions["adapter"];
@@ -80,7 +84,7 @@ export async function executeRun(id: string, input: OptimizeRequest, options: Ex
   const now = options.now ?? Date.now;
   const { store } = options;
   const controller = new AbortController();
-  const observer = new RunObserver(runMeta(id, "job", input), options.sink);
+  const observer = new RunObserver(runMeta(id, "job", input, options.client), options.sink);
   let record: RunRecord = (await store.get(id)) ?? newRunRecord(id, input, now());
   let writes: Promise<void> = Promise.resolve();
   const persist = (patch: Partial<RunRecord>): Promise<void> => {

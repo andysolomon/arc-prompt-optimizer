@@ -32,9 +32,11 @@ import { buildPatternCandidates } from "@/lib/pattern-candidates";
 import { getModel } from "@/lib/models";
 import { judgeWithJev, type JevEntry } from "@/lib/jev";
 import { JEV_RUBRIC, JevJudgeAdapter, MockJevJudgeAdapter } from "@/lib/jev-judge";
+import { describeError } from "@/lib/run-log";
 import {
   JUDGE_RANKING_OBJECTIVE,
   MAX_REVISION_ROUNDS,
+  type CandidateFailure,
   type JudgeReport,
   type LoopReport,
   type OptimizeRequest,
@@ -81,34 +83,42 @@ export function completionTimeoutMs(model: OptimizeRequest["model"]): number {
 /**
  * Evaluates every candidate concurrently with the core's evaluateCandidate (the same per-candidate path
  * evaluateSuite takes sequentially), so a run waits for the slowest completion rather than the sum of all of
- * them. The first failure aborts the remaining completions and names the candidate that failed.
+ * them. A candidate whose completion fails (a timeout on one slow answer, a rejected request) is reported under
+ * `failures` and the others still count: a run should not throw away four finished completions because a fifth
+ * did not come back. Only when every candidate failed, or the run was cancelled, does this throw, naming the
+ * first candidate that failed.
  */
 async function evaluateConcurrently(
   adapter: CompletionAdapter,
   candidates: readonly PromptCandidate[],
   suite: EvaluationSuite,
   options: Required<Pick<EvaluateOptions, "model" | "timeoutMs" | "signal">>,
-): Promise<{ candidates: readonly CandidateEvaluation[]; completionsUsed: number }> {
-  const controller = new AbortController();
-  const onAbort = () => controller.abort();
-  if (options.signal.aborted) controller.abort();
-  options.signal.addEventListener("abort", onAbort, { once: true });
-  try {
-    const evaluations = await Promise.all(
-      candidates.map((candidate) =>
-        evaluateCandidate(adapter, candidate, suite, { ...options, signal: controller.signal }).catch((error: unknown) => {
-          const first = !controller.signal.aborted;
-          controller.abort();
-          if (!first || options.signal.aborted) throw error;
-          const label = candidateLabel(candidate.metadata?.label, candidate.prompt.pattern).toLowerCase();
-          throw new Error(`The ${label} candidate failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-        }),
-      ),
-    );
-    return { candidates: evaluations, completionsUsed: candidates.length * suite.cases.length };
-  } finally {
-    options.signal.removeEventListener("abort", onAbort);
+): Promise<{ candidates: readonly CandidateEvaluation[]; failures: readonly CandidateFailure[]; completionsUsed: number }> {
+  const settled = await Promise.allSettled(candidates.map((candidate) => evaluateCandidate(adapter, candidate, suite, options)));
+  const evaluations: CandidateEvaluation[] = [];
+  const failures: CandidateFailure[] = [];
+  let firstError: unknown;
+  settled.forEach((outcome, index) => {
+    if (outcome.status === "fulfilled") {
+      evaluations.push(outcome.value);
+      return;
+    }
+    const candidate = candidates[index]!;
+    if (firstError === undefined) firstError = outcome.reason;
+    failures.push({ candidateId: candidate.id, label: candidateLabel(candidate.metadata?.label, candidate.prompt.pattern), error: describeError(outcome.reason) });
+  });
+  // A cancelled run must stop here, whatever had already finished.
+  if (options.signal.aborted) throw firstError ?? new Error("Run cancelled.");
+  if (evaluations.length === 0 && failures.length > 0) {
+    const first = failures[0]!;
+    throw new Error(`The ${first.label.toLowerCase()} candidate failed: ${first.error.message}`, { cause: firstError });
   }
+  return { candidates: evaluations, failures, completionsUsed: candidates.length * suite.cases.length };
+}
+
+/** The underlying error of a failure `evaluateConcurrently` wrapped, for a failure report on a single candidate. */
+function causeOf(error: unknown): unknown {
+  return error instanceof Error && error.cause !== undefined ? error.cause : error;
 }
 
 /**
@@ -257,7 +267,8 @@ function planReport(plan: RewritePlan | undefined, suite: EvaluationSuite, candi
 /**
  * (rewrite + plan) → render → run every candidate concurrently → score → (revise the rewrite for the checks it
  * failed and run the revision, up to MAX_REVISION_ROUNDS times while the time budget allows) → (judge) → (refine
- * the judged winner) → rank. Emits one step event as each step completes. Prompts and outputs are held in memory
+ * the judged winner) → rank. Emits one step event as each step completes. A candidate whose completion fails is
+ * reported under `failures` and left out of the ranking; the run only fails when no candidate finished. Prompts and outputs are held in memory
  * for the duration of the request only and are never logged or persisted.
  */
 export async function runOptimization(request: OptimizeRequest, options: RunOptions): Promise<OptimizeResult> {
@@ -319,6 +330,8 @@ export async function runOptimization(request: OptimizeRequest, options: RunOpti
   const firstRound = await evaluateConcurrently(adapter, candidates, suite, { model: request.model, timeoutMs: firstRoundTimeoutMs, signal: options.signal });
   completionsUsed += firstRound.completionsUsed;
   let evaluations: readonly CandidateEvaluation[] = firstRound.candidates;
+  const failures: CandidateFailure[] = [...firstRound.failures];
+  for (const failure of firstRound.failures) options.emit({ step: `run:${failure.candidateId}`, status: "failed", error: failure.error });
   let lastRoundLatencyMs = slowestLatencyMs(firstRound.candidates, timeoutMs);
 
   // The lesson's loop: score, find the checks the rewrite failed, revise it for them, run the revision, repeat.
@@ -330,6 +343,9 @@ export async function runOptimization(request: OptimizeRequest, options: RunOpti
     loop = { rounds: 0, stoppedBecause: "rewrite_failed" };
   } else if (!planHasCriteria(plan)) {
     loop = { rounds: 0, stoppedBecause: "no_criteria" };
+  } else if (failures.some((failure) => failure.candidateId === rewriteCandidate.id)) {
+    // The rewrite produced no output to score, so there is nothing to revise against.
+    loop = { rounds: 0, stoppedBecause: "candidate_failed" };
   } else {
     let lineage = rewriteCandidate;
     let stoppedBecause: LoopReport["stoppedBecause"] = "max_rounds";
@@ -364,11 +380,7 @@ export async function runOptimization(request: OptimizeRequest, options: RunOpti
       adapter.track([revision]);
       options.emit({ step: "revise", status: "revised", round, candidateId: revision.id, candidateLabel: candidateLabel(revision.metadata?.label, revision.prompt.pattern) });
       const roundStarted = now();
-      const run = await evaluateConcurrently(adapter, [revision], suite, { model: request.model, timeoutMs: roundTimeoutMs, signal: options.signal });
-      completionsUsed += run.completionsUsed;
-      lastRoundLatencyMs = Math.max(slowestLatencyMs(run.candidates, now() - roundStarted), 1);
       candidates = [...candidates, revision];
-      evaluations = [...evaluations, ...run.candidates];
       revisions.push({
         status: "revised",
         round,
@@ -380,6 +392,21 @@ export async function runOptimization(request: OptimizeRequest, options: RunOpti
         measurements: outcome.measurements,
         attempts: outcome.attempts,
       });
+      completionsUsed += suite.cases.length;
+      let run: Awaited<ReturnType<typeof evaluateConcurrently>>;
+      try {
+        run = await evaluateConcurrently(adapter, [revision], suite, { model: request.model, timeoutMs: roundTimeoutMs, signal: options.signal });
+      } catch (error) {
+        if (options.signal.aborted) throw error;
+        // The revision was written but its run failed: keep the candidates that finished and stop revising.
+        const failure: CandidateFailure = { candidateId: revision.id, label: candidateLabel(revision.metadata?.label, revision.prompt.pattern), error: describeError(causeOf(error)) };
+        failures.push(failure);
+        options.emit({ step: `run:${revision.id}`, status: "failed", error: failure.error });
+        stoppedBecause = "candidate_failed";
+        break;
+      }
+      lastRoundLatencyMs = Math.max(slowestLatencyMs(run.candidates, now() - roundStarted), 1);
+      evaluations = [...evaluations, ...run.candidates];
       lineage = revision;
       if (round === MAX_REVISION_ROUNDS + 1) stoppedBecause = checksOf(evaluations, revision.id).every((check) => check.passed) ? "all_checks_passed" : "max_rounds";
     }
@@ -388,11 +415,14 @@ export async function runOptimization(request: OptimizeRequest, options: RunOpti
 
   let judge: JudgeReport = { status: "not_requested" };
   if (request.judge) {
-    const entries: JevEntry[] = candidates.map((candidate) => ({
-      candidateId: candidate.id,
-      prompt: candidate.prompt.text,
-      output: outputs.get(candidate.id) ?? "",
-    }));
+    // Only candidates that produced an output are judged; a failed candidate has nothing to score.
+    const entries: JevEntry[] = candidates
+      .filter((candidate) => outputs.has(candidate.id))
+      .map((candidate) => ({
+        candidateId: candidate.id,
+        prompt: candidate.prompt.text,
+        output: outputs.get(candidate.id) ?? "",
+      }));
     if (mockProvidersEnabled(options.env)) {
       judge = mockJudge(entries);
     } else if (options.env.TYPESAFE_API_KEY === undefined) {
@@ -478,6 +508,7 @@ export async function runOptimization(request: OptimizeRequest, options: RunOpti
     plan: planReport(plan, suite, candidates, rewrite),
     revisions,
     loop,
+    failures,
     refine,
     completionsUsed: completionsUsed + refineCompletions,
     model: request.model,

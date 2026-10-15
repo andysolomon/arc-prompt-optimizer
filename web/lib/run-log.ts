@@ -1,5 +1,9 @@
 import "server-only";
-import type { ModelId, OptimizeResult, RefineSettings, StepEvent } from "@/lib/types";
+import type { ClientInfo } from "@/lib/client-info";
+import { MAX_ERROR_MESSAGE_CHARACTERS, type ModelId, type OptimizeResult, type RefineSettings, type RunErrorInfo, type RunErrorKind, type StepEvent } from "@/lib/types";
+
+export { MAX_ERROR_MESSAGE_CHARACTERS };
+export type { RunErrorInfo, RunErrorKind };
 
 /**
  * Structured run logging. Every event is one JSON line on stdout (or stderr for failures), so Vercel's runtime
@@ -17,19 +21,10 @@ export interface RunMeta {
   readonly refine?: RefineSettings;
   /** Images attached to every completion. */
   readonly attachments: number;
+  /** The browser that started the run (phone or not, platform, browser family), so failures can be sliced by device. */
+  readonly client?: ClientInfo;
 }
 
-export type RunErrorKind = "timeout" | "cancelled" | "rate_limit" | "provider" | "unknown";
-
-/** What went wrong, without any request content: the error class, a bounded message, and the provider status. */
-export interface RunErrorInfo {
-  readonly kind: RunErrorKind;
-  readonly name: string;
-  readonly message: string;
-  readonly statusCode?: number;
-}
-
-export const MAX_ERROR_MESSAGE_CHARACTERS = 500;
 
 /** Walks `cause` links so a wrapped error ("The baseline candidate failed: …") still classifies by its root. */
 function* causes(error: unknown): Generator<unknown> {
@@ -101,6 +96,7 @@ export class RunObserver {
       rewrite: this.#meta.rewrite,
       ...(this.#meta.refine === undefined ? {} : { refine: this.#meta.refine }),
       attachments: this.#meta.attachments,
+      ...(this.#meta.client === undefined ? {} : { client: this.#meta.client }),
       elapsedMs: Math.round(this.#now() - this.#started),
       ...fields,
     });
@@ -108,6 +104,11 @@ export class RunObserver {
 
   step(event: StepEvent): void {
     this.#lastStep = event.step;
+    // A candidate whose completion failed while the run went on: logged at error level so it clusters with run failures.
+    if (event.step.startsWith("run:") && event.status === "failed") {
+      this.#log("error", "arc.run.candidate_failed", { step: event.step, ...(event.error === undefined ? {} : { error: event.error }) });
+      return;
+    }
     this.#log("info", "arc.run.step", {
       step: event.step,
       ...(event.status === undefined ? {} : { status: event.status }),
@@ -122,6 +123,7 @@ export class RunObserver {
     this.#log("info", "arc.run.completed", {
       completionsUsed: result.completionsUsed,
       candidates: result.candidates.length,
+      candidatesFailed: result.failures.length,
       rewriteStatus: result.rewrite.status,
       ...(result.rewrite.status === "failed" ? { rewriteReason: result.rewrite.reason } : {}),
       judgeStatus: result.judge.status,

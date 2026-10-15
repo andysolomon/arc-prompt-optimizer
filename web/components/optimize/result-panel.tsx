@@ -66,9 +66,19 @@ export function loopSummary(result: OptimizeResult): string {
       return "No objective checks were planned, so there was nothing to revise against.";
     case "rewrite_failed":
       return "The rewrite failed, so there was nothing to revise.";
+    case "candidate_failed":
+      return `${rounds}${revised === 0 ? "The rewrite's own run failed, so there was no output to revise against." : "The last revision's run failed, so revising stopped."}`;
     case "not_requested":
       return "";
   }
+}
+
+/** One line per candidate that did not finish, for the result card. */
+export function failureSummary(result: OptimizeResult): string | undefined {
+  if (result.failures.length === 0) return undefined;
+  const total = result.candidates.length;
+  const names = result.failures.map((failure) => `${failure.label}: ${failure.error.message}`).join(" ");
+  return `${result.failures.length} of ${total} candidates did not finish and ${result.failures.length === 1 ? "is" : "are"} left out of the ranking. ${names}`;
 }
 
 export interface RowView {
@@ -168,6 +178,7 @@ export function ResultPanel({
   const planned = result.plan.status === "planned" ? result.plan : undefined;
   const criteria = planned === undefined ? [] : describeCriteria(planned);
   const summary = loopSummary(result);
+  const failed = failureSummary(result);
   const refineReport = result.refine.status === "refined" ? result.refine : undefined;
   const improvedRounds = refineReport?.rounds.filter((round) => round.improved).length ?? 0;
 
@@ -195,6 +206,13 @@ export function ResultPanel({
             {attachments.length === 1 ? "This image was" : `These ${attachments.length} images were`} sent with every completion.
           </span>
           <AttachmentStrip attachments={attachments} />
+        </div>
+      ) : null}
+
+      {failed !== undefined ? (
+        <div role="alert" data-testid="candidate-failures" className="rounded-[10px] border border-destructive/40 bg-destructive/5 px-4 py-3 text-[13px] leading-relaxed">
+          <p className="m-0 font-medium">Some candidates did not finish.</p>
+          <p className="m-0 mt-1 text-muted-foreground">{failed} The ranking below covers the candidates that did. Run again, or pick a faster model, to compare all of them.</p>
         </div>
       ) : null}
 

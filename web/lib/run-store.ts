@@ -1,8 +1,7 @@
 import "server-only";
 import { Redis } from "@upstash/redis";
 import type { ServerEnv } from "@/lib/env";
-import type { RunErrorInfo } from "@/lib/run-log";
-import type { AttachmentInfo, ModelId, OptimizeResult, RefineSettings, StepEvent } from "@/lib/types";
+import type { AttachmentInfo, ModelId, OptimizeResult, RefineSettings, RunErrorInfo, StepEvent } from "@/lib/types";
 
 export type RunStatus = "running" | "done" | "failed" | "cancelled";
 
@@ -38,11 +37,7 @@ export interface RunStore {
 
 /** How long a run and its result stay available to be collected. */
 export const RUN_TTL_MS = 30 * 60 * 1000;
-export const RUN_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/u;
-
-export function isRunId(value: string | null): value is string {
-  return value !== null && RUN_ID_PATTERN.test(value);
-}
+export { RUN_ID_PATTERN, isRunId } from "@/lib/run-store-id";
 
 /** In-process store. Shared across route modules through `globalThis`; per instance, so it suits local use. */
 export class MemoryRunStore implements RunStore {

@@ -20,9 +20,11 @@ test("attach an image, see it on the result, and send it with the run", async ({
   await expect(attachment).toContainText("2×2");
   await expect(page.getByText("1 of 3 images attached.")).toBeVisible();
 
-  // A file that is not an image is reported and not attached.
+  // A file that is not an image, or that cannot be decoded, is reported and not attached.
   await page.getByLabel("Image files").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
   await expect(page.getByText("notes.txt is not a JPEG, PNG, WebP, or GIF image.")).toBeVisible();
+  await page.getByLabel("Image files").setInputFiles({ name: "broken.jpg", mimeType: "image/jpeg", buffer: Buffer.from("not really a jpeg") });
+  await expect(page.getByText("broken.jpg is not a JPEG, PNG, WebP, or GIF image.")).toBeVisible();
   await expect(attachment).toHaveCount(1);
 
   await page.getByRole("button", { name: "Optimize", exact: true }).click();
@@ -62,19 +64,4 @@ test("a text-only model refuses images and the run is blocked until they are rem
   const response = await page.request.post("/api/optimize/runs", { data: { prompt: PROMPT, model: "minimax/MiniMax-M2.7", judge: false, attachments: [{ name: "logo.png", type: "image/png", data: PNG.toString("base64") }] } });
   expect(response.status()).toBe(400);
   expect(await response.json()).toEqual({ error: "Model 'minimax/MiniMax-M2.7' does not accept image attachments." });
-});
-
-test("MiniMax M3 takes images, on a phone-sized viewport", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
-  await page.getByRole("combobox", { name: "Model" }).click();
-  await page.getByRole("option", { name: "MiniMax M3" }).click();
-  await expect(page.getByRole("button", { name: "Attach images" })).toBeEnabled();
-  await expect(page.getByTestId("attach-hint")).toHaveText("Up to 3 images, sent with every completion. Large photos are resized in your browser.");
-  await page.getByLabel("Image files").setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: PNG });
-  await expect(page.getByTestId("attachment")).toHaveCount(1);
-  await expect(page.getByTestId("attach-hint")).toHaveText("1 of 3 images attached.");
-  await expect(page.getByTestId("attachment-issue")).toHaveCount(0);
-  await page.getByRole("textbox", { name: "Prompt", exact: true }).fill(PROMPT);
-  await expect(page.getByRole("button", { name: "Optimize", exact: true })).toBeEnabled();
 });

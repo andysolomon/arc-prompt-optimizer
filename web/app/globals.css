@@ -5,6 +5,19 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * iOS Safari zooms the page when a focused field's font is under 16px. On touch devices every text field, text
+ * area, and select renders at 16px whatever utility class it carries; this rule sits outside Tailwind's layers so
+ * it wins over them. Desktop keeps the compact sizes.
+ */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}
+
 :root {
   --background: #ffffff;
   --foreground: #09090b;

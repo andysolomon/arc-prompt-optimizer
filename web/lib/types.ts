@@ -395,13 +395,36 @@ export const revisionReportSchema = z.discriminatedUnion("status", [
 
 export type RevisionReport = z.infer<typeof revisionReportSchema>;
 
-/** Why the loop stopped. */
+/** Why the loop stopped. `candidate_failed`: the rewrite's or a revision's own run failed, so there was no output to revise against. */
 export const loopReportSchema = z.object({
   rounds: z.number(),
-  stoppedBecause: z.enum(["rewrite_failed", "no_criteria", "all_checks_passed", "max_rounds", "time_budget", "revision_failed", "not_requested"]),
+  stoppedBecause: z.enum(["rewrite_failed", "no_criteria", "all_checks_passed", "max_rounds", "time_budget", "revision_failed", "candidate_failed", "not_requested"]),
 });
 
 export type LoopReport = z.infer<typeof loopReportSchema>;
+
+export const MAX_ERROR_MESSAGE_CHARACTERS = 500;
+export const RUN_ERROR_KINDS = ["timeout", "cancelled", "rate_limit", "provider", "unknown"] as const;
+export type RunErrorKind = (typeof RUN_ERROR_KINDS)[number];
+
+/** What went wrong, without any request content: the error class, a bounded message, and the provider status. */
+export const runErrorInfoSchema = z.object({
+  kind: z.enum(RUN_ERROR_KINDS),
+  name: z.string(),
+  message: z.string(),
+  statusCode: z.number().optional(),
+});
+
+export type RunErrorInfo = z.infer<typeof runErrorInfoSchema>;
+
+/** A candidate whose completion failed while the rest of the run went on; it has no evaluation and no rank. */
+export const candidateFailureSchema = z.object({
+  candidateId: z.string(),
+  label: z.string(),
+  error: runErrorInfoSchema,
+});
+
+export type CandidateFailure = z.infer<typeof candidateFailureSchema>;
 
 export const optimizeResultSchema = z.object({
   baselineCandidateId: z.string(),
@@ -414,6 +437,7 @@ export const optimizeResultSchema = z.object({
   plan: planReportSchema,
   revisions: z.array(revisionReportSchema),
   loop: loopReportSchema,
+  failures: z.array(candidateFailureSchema),
   completionsUsed: z.number(),
   model: z.enum(MODEL_IDS),
 });
@@ -434,7 +458,9 @@ export interface OptimizeResult {
   readonly plan: PlanReport;
   readonly revisions: readonly RevisionReport[];
   readonly loop: LoopReport;
-  /** Every completion requested from the model, including the rewrite, retries, and revisions. */
+  /** Candidates whose completion failed; the ranking covers the candidates that finished. */
+  readonly failures: readonly CandidateFailure[];
+  /** Every completion requested from the model, including the rewrite, retries, revisions, and failed completions. */
   readonly completionsUsed: number;
   readonly model: ModelId;
 }
@@ -452,8 +478,10 @@ export type StepEvent = {
   readonly candidateIds?: readonly string[];
   /** Human labels matching `candidateIds`, sent with the `render` step. */
   readonly candidateLabels?: readonly string[];
-  /** Sent with the `rewrite` and `revise` steps. */
+  /** Sent with the `rewrite` and `revise` steps, and with a `run:` step whose completion failed. */
   readonly status?: "rewritten" | "revised" | "failed";
+  /** Sent with a failed `run:` step: why that candidate's completion failed. */
+  readonly error?: RunErrorInfo;
   /** Sent with the `revise` step: the loop round (2 for the first revision). */
   readonly round?: number;
   /** Sent with a successful `revise` step: the revision candidate about to run. */

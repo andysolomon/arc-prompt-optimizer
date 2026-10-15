@@ -46,7 +46,7 @@ export class MemoryRateLimiter implements RateLimiter {
 
 const cached = new Map<string, RateLimiter>();
 
-export function rateLimiterFor(env: ServerEnv, scope: "optimize" | "categorize" = "optimize"): RateLimiter {
+export function rateLimiterFor(env: ServerEnv, scope: "optimize" | "categorize" | "client_events" = "optimize"): RateLimiter {
   const previous = cached.get(scope);
   if (previous) return previous;
   let limiter: RateLimiter;
