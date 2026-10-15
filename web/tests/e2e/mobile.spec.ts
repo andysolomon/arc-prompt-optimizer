@@ -29,6 +29,29 @@ test("the attach control is a native label for the file input and accepts any im
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+// MiniMax M3 reads images through MiniMax's OpenAI-compatible endpoint; a deployment with only the gateway keys
+// used to disable the attach control for every model, with the reason only in a hover tooltip a phone never shows.
+test("MiniMax M3 takes images, and a text-only model says why it does not", async ({ page }) => {
+  await page.goto("/");
+  const pick = async (label: string) => {
+    await page.getByRole("combobox", { name: "Model" }).click();
+    await page.getByRole("option", { name: label, exact: true }).click();
+  };
+  await pick("MiniMax M2.7");
+  await expect(page.getByRole("button", { name: "Attach images" })).toBeDisabled();
+  await expect(page.getByTestId("attach-hint")).toHaveText("MiniMax M2.7 does not accept images. Pick a vision model to attach them.");
+
+  await pick("MiniMax M3");
+  await expect(page.locator('label[for="attach-images"]')).toHaveText("Attach images");
+  await expect(page.getByTestId("attach-hint")).toHaveText("Up to 3 images, sent with every completion. Large photos are resized in your browser.");
+  await page.getByLabel("Image files").setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: PNG });
+  await expect(page.getByTestId("attachment")).toHaveCount(1);
+  await expect(page.getByTestId("attach-hint")).toHaveText("1 of 3 images attached.");
+  await expect(page.getByTestId("attachment-issue")).toHaveCount(0);
+  await page.getByRole("textbox", { name: "Prompt", exact: true }).fill("Write alt text for this image.");
+  await expect(page.getByRole("button", { name: "Optimize", exact: true })).toBeEnabled();
+});
+
 const RUN_FAILURE = {
   id: "11111111-1111-4111-8111-111111111111",
   status: "failed",

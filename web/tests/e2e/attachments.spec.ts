@@ -49,15 +49,19 @@ test("a text-only model refuses images and the run is blocked until they are rem
   await page.getByLabel("Image files").setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: PNG });
   await expect(page.getByTestId("attachment")).toHaveCount(1);
   await page.getByRole("combobox", { name: "Model" }).click();
-  await page.getByRole("option", { name: "MiniMax M3" }).click();
-  await expect(page.getByTestId("attachment-issue")).toContainText("MiniMax M3 does not accept images.");
+  await page.getByRole("option", { name: "MiniMax M2.7" }).click();
+  await expect(page.getByTestId("attachment-issue")).toContainText("MiniMax M2.7 does not accept images.");
   await expect(page.getByRole("button", { name: "Optimize", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Attach images" })).toBeDisabled();
   await page.getByRole("button", { name: "Remove logo.png" }).click();
   await expect(page.getByTestId("attachment-issue")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Optimize", exact: true })).toBeEnabled();
+  // With nothing attached, the reason the button is disabled is written next to it rather than hidden in a hover
+  // tooltip, so a phone (no hover) sees it too.
+  await expect(page.getByTestId("attach-hint")).toHaveText("MiniMax M2.7 does not accept images. Pick a vision model to attach them.");
+  await expect(page.getByRole("button", { name: "Attach images" })).toBeDisabled();
 
-  const response = await page.request.post("/api/optimize/runs", { data: { prompt: PROMPT, model: "minimax/MiniMax-M3", judge: false, attachments: [{ name: "logo.png", type: "image/png", data: PNG.toString("base64") }] } });
+  const response = await page.request.post("/api/optimize/runs", { data: { prompt: PROMPT, model: "minimax/MiniMax-M2.7", judge: false, attachments: [{ name: "logo.png", type: "image/png", data: PNG.toString("base64") }] } });
   expect(response.status()).toBe(400);
-  expect(await response.json()).toEqual({ error: "Model 'minimax/MiniMax-M3' does not accept image attachments." });
+  expect(await response.json()).toEqual({ error: "Model 'minimax/MiniMax-M2.7' does not accept image attachments." });
 });
